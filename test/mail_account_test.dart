@@ -7,14 +7,10 @@ void main() {
     expect(parmtech.map((candidate) => candidate.host), [
       'parmtech.au',
       'premium214.web-hosting.com',
-      'mail.parmtech.au',
     ]);
 
     final other = cPanelHostCandidates('admin@example.org');
-    expect(other.map((candidate) => candidate.host), [
-      'example.org',
-      'mail.example.org',
-    ]);
+    expect(other.map((candidate) => candidate.host), ['example.org']);
   });
 
   test('mailbox email is normalized for account identity', () {

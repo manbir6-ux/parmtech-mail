@@ -11,7 +11,7 @@ class MailNotifications {
       macOS: DarwinInitializationSettings(),
       linux: LinuxInitializationSettings(defaultActionName: 'Open'),
       windows: WindowsInitializationSettings(
-        appName: 'ParmTech Mail',
+        appName: 'Parmtech Mail',
         appUserModelId: 'au.parmtech.mail',
         guid: 'a1e42715-8094-4e8b-9a16-10f54b67f6a2',
       ),

@@ -3,6 +3,7 @@ import unittest
 from prepare_android import (
     DESUGARING_DEPENDENCY,
     INTERNET_PERMISSION,
+    disable_android_backup,
     enable_core_library_desugaring,
     ensure_internet_permission,
 )
@@ -15,6 +16,17 @@ class AndroidBuildPreparationTests(unittest.TestCase):
         self.assertIn(INTERNET_PERMISSION, prepared)
         self.assertEqual(ensure_internet_permission(prepared), prepared)
         self.assertEqual(prepared.count(INTERNET_PERMISSION), 1)
+
+    def test_backup_is_disabled_and_existing_value_is_overridden(self):
+        manifest = '<manifest><application android:allowBackup="true"></application></manifest>'
+        prepared = disable_android_backup(manifest)
+        self.assertIn('android:allowBackup="false"', prepared)
+        self.assertNotIn('android:allowBackup="true"', prepared)
+        self.assertEqual(disable_android_backup(prepared), prepared)
+
+    def test_backup_setting_requires_generated_application_element(self):
+        with self.assertRaises(ValueError):
+            disable_android_backup("<manifest></manifest>")
 
     def test_gradle_desugaring_configuration_is_idempotent(self):
         gradle = """android {

@@ -27,6 +27,24 @@ def ensure_internet_permission(manifest: str) -> str:
     )
 
 
+def disable_android_backup(manifest: str) -> str:
+    application = re.search(r"<application\b[^>]*>", manifest)
+    if application is None:
+        raise ValueError("Could not find the Android application element")
+
+    tag = application.group()
+    backup_attribute = re.compile(
+        r"\bandroid:allowBackup\s*=\s*([\"'][^\"']*[\"'])"
+    )
+    if backup_attribute.search(tag):
+        updated_tag = backup_attribute.sub('android:allowBackup="false"', tag, count=1)
+    else:
+        closing = -2 if tag.endswith("/>") else -1
+        updated_tag = tag[:closing] + ' android:allowBackup="false"' + tag[closing:]
+
+    return manifest[: application.start()] + updated_tag + manifest[application.end() :]
+
+
 def enable_core_library_desugaring(gradle: str) -> str:
     options = re.search(r"(?m)^([ \t]*)compileOptions[ \t]*\{[ \t]*$", gradle)
     if options is None:
@@ -66,12 +84,16 @@ def prepare_android(root: Path = ROOT) -> None:
     if not gradle_path.is_file():
         raise FileNotFoundError(f"Android Gradle file not found: {gradle_path}")
 
-    manifest = ensure_internet_permission(manifest_path.read_text())
+    manifest = disable_android_backup(
+        ensure_internet_permission(manifest_path.read_text())
+    )
     gradle = enable_core_library_desugaring(gradle_path.read_text())
     manifest_path.write_text(manifest)
     gradle_path.write_text(gradle)
     if INTERNET_PERMISSION not in manifest_path.read_text():
         raise RuntimeError("Android INTERNET permission was not added")
+    if 'android:allowBackup="false"' not in manifest_path.read_text():
+        raise RuntimeError("Android backups were not disabled for secure storage")
     if DESUGARING_DEPENDENCY not in gradle_path.read_text():
         raise RuntimeError("Android core library desugaring was not enabled")
 

@@ -6,7 +6,12 @@ import 'mail_account.dart';
 
 class SecureAccountVault {
   SecureAccountVault({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage();
+      : _storage = storage ??
+            const FlutterSecureStorage(
+              // Avoid macOS Keychain Sharing entitlements and provisioning;
+              // standard Keychain still protects credentials on this device.
+              mOptions: MacOsOptions(usesDataProtectionKeychain: false),
+            );
 
   static const int maxAccounts = 10;
   static const String _storageKey = 'parm_mail.accounts.v1';

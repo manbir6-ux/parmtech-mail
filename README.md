@@ -8,7 +8,7 @@ Premium, cross-platform email client for cPanel/Namecheap mailboxes, built with 
 - IMAP over validated TLS (993), secure host fallback, inbox fetch and SMTP send over TLS (465).
 - Email + password account setup, with a maximum of 10 accounts.
 - Server-reported mailbox folders, local inbox search, explicit account removal and foreground sync alerts.
-- Passwords stored only in OS-backed secure storage; there is no ParmTech credential server.
+- Passwords stored only in OS-backed secure storage; Android backup is disabled to prevent restoring encrypted credentials without their device key. There is no ParmTech credential server.
 - For `parmtech.au`, IMAP tries the supplied cPanel server `premium214.web-hosting.com` first, then the domain shown in cPanel, `parmtech.au`. It does not guess a `mail.` hostname. A host fallback is attempted for connection errors only; authentication failures stop immediately.
 - CI runs analysis, Flutter tests, Android preparation tests, and release builds for Android, iOS (unsigned), Windows, macOS DMG and Linux on main-branch pushes.
 

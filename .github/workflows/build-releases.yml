@@ -19,6 +19,23 @@ jobs:
       - run: flutter create . --platforms=android
       - name: Set Android app label
         run: sed -i 's/android:label="parm_mail"/android:label="Parmtech Mail"/' android/app/src/main/AndroidManifest.xml
+      - name: Add Android internet permission
+        run: |
+          python3 - <<'PYCODE'
+          from pathlib import Path
+
+          path = Path("android/app/src/main/AndroidManifest.xml")
+          manifest = path.read_text()
+          permission = '<uses-permission android:name="android.permission.INTERNET" />'
+          if permission not in manifest:
+              marker = "    <application"
+              if marker not in manifest:
+                  raise SystemExit("Could not find Android application manifest element")
+              manifest = manifest.replace(marker, f"    {permission}\n{marker}", 1)
+              path.write_text(manifest)
+          if permission not in path.read_text():
+              raise SystemExit("Android INTERNET permission was not added")
+          PYCODE
       - name: Enable Android core library desugaring
         run: |
           python3 - <<'PYCODE'
@@ -82,7 +99,7 @@ jobs:
           name: parmtech-mail-windows
           path: |
             ParmTech-Mail-Windows.zip
-            artifacts/Parmtech-Mail-Setup.exe
+            artifacts/ParmTech-Mail-Setup.exe
 
   linux:
     if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/')

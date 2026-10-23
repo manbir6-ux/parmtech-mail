@@ -29,6 +29,8 @@ Use IMAP for folders, message flags, and synchronization; SMTP for sending. Cach
 
 `CpanelMailService` uses the `enough_mail` Dart IMAP/SMTP client directly from the device. It connects with implicit TLS and standard ports (IMAP 993 / SMTP 465), uses finite connection and message-fetch timeouts, and closes sessions on both success and failure. Host candidates are tried only when the socket/TLS connection fails; the first successful IMAP login is stored in the secure vault. An authentication error is not treated as a server-name problem. Message bodies and credentials are not sent to a ParmTech server.
 
+Generated macOS builds need `com.apple.security.network.client` in both DebugProfile and Release entitlements for outbound IMAP/SMTP sockets. `tool/prepare_macos.py` adds and verifies this capability after `flutter create`; the release and CI workflows run it automatically.
+
 The app checks all saved accounts every five minutes while the app process is running. It uses IMAP SEARCH for unread counts on inactive accounts and refreshes message bodies only for the active inbox. A local notification can be raised when a later check detects more unread messages. Mobile operating systems may suspend timers in the background, so this is not guaranteed background delivery; shared-hosting IMAP has no generic push guarantee and this app does not run a server-side watcher.
 
 ## Suggested next modules

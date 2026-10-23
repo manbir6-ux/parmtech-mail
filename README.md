@@ -21,6 +21,7 @@ Use Flutter 3.47+ (Dart 3.13+). On Linux, install Flutter desktop build prerequi
 ```sh
 flutter create . --platforms=android,ios,windows,macos,linux
 python3 tool/prepare_android.py
+python3 tool/prepare_macos.py
 flutter pub get
 flutter run
 ```

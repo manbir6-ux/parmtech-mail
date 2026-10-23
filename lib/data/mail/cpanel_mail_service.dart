@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:enough_mail/enough_mail.dart' as mail;
 
 import '../accounts/mail_account.dart' as model;
@@ -36,6 +38,7 @@ class MailFolder {
 class CpanelMailService {
   static const _connectTimeout = Duration(seconds: 20);
   static const _responseTimeout = Duration(seconds: 25);
+  static const _closeTimeout = Duration(seconds: 3);
 
   Future<model.MailAccount> verify(model.MailAccount account) async {
     final session = await _connectAndLogin(account);
@@ -160,18 +163,24 @@ class CpanelMailService {
       }
 
       try {
-        await client.ehlo();
+        await _withSmtpTimeout(client, client.ehlo);
         if (client.serverInfo.supportsAuth(mail.AuthMechanism.plain)) {
-          await client.authenticate(
-            account.email.trim(),
-            account.password,
-            mail.AuthMechanism.plain,
+          await _withSmtpTimeout(
+            client,
+            () => client.authenticate(
+              account.email.trim(),
+              account.password,
+              mail.AuthMechanism.plain,
+            ),
           );
         } else if (client.serverInfo.supportsAuth(mail.AuthMechanism.login)) {
-          await client.authenticate(
-            account.email.trim(),
-            account.password,
-            mail.AuthMechanism.login,
+          await _withSmtpTimeout(
+            client,
+            () => client.authenticate(
+              account.email.trim(),
+              account.password,
+              mail.AuthMechanism.login,
+            ),
           );
         } else {
           throw const MailConnectionException(
@@ -189,7 +198,10 @@ class CpanelMailService {
               ..to = [mail.MailAddress('', to.trim())]
               ..subject = subject;
 
-        final response = await client.sendMessage(message.buildMimeMessage());
+        final response = await _withSmtpTimeout(
+          client,
+          () => client.sendMessage(message.buildMimeMessage()),
+        );
         if (!response.isOkStatus) {
           throw const MailConnectionException(
             'The outgoing server rejected the message.',
@@ -214,7 +226,11 @@ class CpanelMailService {
     final connectionErrors = <String>[];
 
     for (final host in hosts) {
-      final client = mail.ImapClient(isLogEnabled: false);
+      final client = mail.ImapClient(
+        isLogEnabled: false,
+        defaultResponseTimeout: _responseTimeout,
+        defaultWriteTimeout: _responseTimeout,
+      );
       try {
         await _connectImap(client, host);
       } catch (error) {
@@ -245,30 +261,46 @@ class CpanelMailService {
         timeout: _connectTimeout,
       );
     } catch (_) {
-      try {
-        await client.disconnect();
-      } catch (_) {}
+      await _disconnectImap(client);
       rethrow;
     }
   }
 
   Future<void> _closeImap(mail.ImapClient client) async {
     try {
-      await client.logout();
+      await client.logout().timeout(_closeTimeout);
     } catch (_) {
-      try {
-        await client.disconnect();
-      } catch (_) {}
+      await _disconnectImap(client);
     }
   }
 
   Future<void> _closeSmtp(mail.SmtpClient client) async {
     try {
-      await client.quit();
+      await client.quit().timeout(_closeTimeout);
     } catch (_) {
       try {
-        await client.disconnect();
+        await client.disconnect().timeout(_closeTimeout);
       } catch (_) {}
+    }
+  }
+
+  Future<void> _disconnectImap(mail.ImapClient client) async {
+    try {
+      await client.disconnect().timeout(_closeTimeout);
+    } catch (_) {}
+  }
+
+  Future<T> _withSmtpTimeout<T>(
+    mail.SmtpClient client,
+    Future<T> Function() operation,
+  ) async {
+    try {
+      return await operation().timeout(_responseTimeout);
+    } on TimeoutException {
+      try {
+        await client.disconnect().timeout(_closeTimeout);
+      } catch (_) {}
+      rethrow;
     }
   }
 

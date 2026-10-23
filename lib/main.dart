@@ -650,8 +650,8 @@ class _MailHomeState extends State<MailHome> with WindowListener {
                   title: const Text('Add account'),
                   onTap: _addAccount,
                 ),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 0, 20, 18),
                   child: Text(
                     'Secure IMAP  ·  Up to 10 accounts',
                     style: TextStyle(fontSize: 10, color: _muted),
@@ -684,7 +684,7 @@ class _MailHomeState extends State<MailHome> with WindowListener {
                           const SizedBox(height: 4),
                           Text(
                             account?.email ?? '',
-                            style: TextStyle(fontSize: 12, color: _muted),
+                            style: const TextStyle(fontSize: 12, color: _muted),
                           ),
                         ],
                       ),
@@ -768,7 +768,7 @@ class _MailHomeState extends State<MailHome> with WindowListener {
                   _syncing
                       ? 'Checking for new mail…'
                       : 'Auto-checks every 5 minutes  ·  ${_messages.length} messages loaded',
-                  style: TextStyle(fontSize: 11, color: _muted),
+                  style: const TextStyle(fontSize: 11, color: _muted),
                 ),
               ),
             ],
@@ -812,13 +812,13 @@ class _MailHomeState extends State<MailHome> with WindowListener {
   );
 
   Widget _desktopMessagePreview(MailItem? mail) {
-    if (mail == null)
-      return Center(
+    if (mail == null) {
+      return const Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.mark_email_read_outlined, size: 52, color: _muted),
-            const SizedBox(height: 14),
+            SizedBox(height: 14),
             Text(
               'Select a message to read',
               style: TextStyle(color: _muted, fontSize: 15),
@@ -826,6 +826,7 @@ class _MailHomeState extends State<MailHome> with WindowListener {
           ],
         ),
       );
+    }
     return Padding(
       padding: const EdgeInsets.fromLTRB(30, 28, 34, 24),
       child: Column(
@@ -873,7 +874,7 @@ class _MailHomeState extends State<MailHome> with WindowListener {
                     ),
                     Text(
                       mail.time.isEmpty ? 'From your mailbox' : mail.time,
-                      style: TextStyle(fontSize: 11, color: _muted),
+                      style: const TextStyle(fontSize: 11, color: _muted),
                     ),
                   ],
                 ),

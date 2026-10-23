@@ -98,6 +98,7 @@ class _MailHomeState extends State<MailHome> with WindowListener {
   int _active = 0;
   bool _loading = true;
   bool _syncing = false;
+  bool _refreshQueued = false;
   String? _error;
   String _folderPath = 'INBOX';
   bool _searchOpen = false;
@@ -127,10 +128,10 @@ class _MailHomeState extends State<MailHome> with WindowListener {
   }
 
   Future<void> _setupWindowsTray() async {
+    tray.TrayIcon? icon;
     try {
-      windowManager.setPreventClose(true);
-      windowManager.setTitle('Parmtech Mail');
-      final icon = tray.TrayIcon.create();
+      await windowManager.setTitle('Parmtech Mail');
+      icon = tray.TrayIcon.create();
       if (icon == null) return;
       icon.icon = tray.ImageAsset.fromAsset('assets/parmtech-mark.png');
       icon.setTooltip('Parmtech Mail');
@@ -150,7 +151,10 @@ class _MailHomeState extends State<MailHome> with WindowListener {
         'Quit Parmtech Mail',
         tray.MenuItemType.normal,
       );
-      if (menu == null || open == null || quit == null) return;
+      if (menu == null || open == null || quit == null) {
+        icon.dispose();
+        return;
+      }
       open.addListener((event) {
         if (event is tray.MenuItemClickedEvent) unawaited(_showFromTray());
       });
@@ -163,14 +167,22 @@ class _MailHomeState extends State<MailHome> with WindowListener {
       icon.setContextMenu(menu);
       icon.setVisible(true);
       _trayIcon = icon;
+      await windowManager.setPreventClose(true);
     } catch (_) {
-      // Tray support must not prevent the inbox from opening.
+      _trayIcon = null;
+      try {
+        icon?.setVisible(false);
+        icon?.dispose();
+      } catch (_) {}
+      try {
+        await windowManager.setPreventClose(false);
+      } catch (_) {}
     }
   }
 
   Future<void> _showFromTray() async {
-    windowManager.show();
-    windowManager.focus();
+    await windowManager.show();
+    await windowManager.focus();
   }
 
   Future<void> _quitFromTray() async {
@@ -182,14 +194,14 @@ class _MailHomeState extends State<MailHome> with WindowListener {
       icon.dispose();
       _trayIcon = null;
     }
-    windowManager.setPreventClose(false);
-    windowManager.close();
+    await windowManager.setPreventClose(false);
+    await windowManager.close();
   }
 
   @override
   void onWindowClose() {
     // Keep mail polling and notifications alive when the user closes the window.
-    if (!_quitting) unawaited(windowManager.hide());
+    if (!_quitting && _trayIcon != null) unawaited(windowManager.hide());
   }
 
   Future<void> _restore() async {
@@ -226,72 +238,113 @@ class _MailHomeState extends State<MailHome> with WindowListener {
   }
 
   Future<void> _refresh() async {
-    if (_accounts.isEmpty || _syncing) return;
+    if (!mounted || _accounts.isEmpty) return;
+    if (_syncing) {
+      _refreshQueued = true;
+      return;
+    }
+    final account = _accounts[_active];
+    final folderPath = _folderPath;
     setState(() {
       _syncing = true;
       _error = null;
     });
     try {
-      final items = await _service.fetchFolder(_accounts[_active], _folderPath);
+      final items = await _service.fetchFolder(account, folderPath);
       final currentUnread = items.where((m) => m.unread).length;
-      final previousUnread = _lastUnreadByEmail[_accounts[_active].email];
-      if (_folderPath.toUpperCase() == 'INBOX' &&
+      final previousUnread = _lastUnreadByEmail[account.id];
+      if (folderPath.toUpperCase() == 'INBOX' &&
           previousUnread != null &&
-          currentUnread > previousUnread) {
+          currentUnread > previousUnread &&
+          _accounts.any((saved) => saved.id == account.id)) {
         try {
           await _notifications.showNewMail(currentUnread - previousUnread);
         } catch (_) {
           /* Notification permission is optional. */
         }
       }
-      if (_folderPath.toUpperCase() == 'INBOX') {
-        _lastUnreadByEmail[_accounts[_active].email] = currentUnread;
+      if (folderPath.toUpperCase() == 'INBOX') {
+        _lastUnreadByEmail[account.id] = currentUnread;
       }
-      if (mounted) {
+      if (mounted &&
+          _accounts.isNotEmpty &&
+          _accounts[_active].id == account.id &&
+          _folderPath == folderPath) {
         setState(() {
           _messages = items;
           _selectedMail ??= items.isEmpty ? null : items.first;
         });
       }
     } catch (e) {
-      if (mounted) setState(() => _error = friendlyMailError(e));
+      if (mounted &&
+          _accounts.isNotEmpty &&
+          _accounts[_active].id == account.id) {
+        setState(() => _error = friendlyMailError(e));
+      }
     } finally {
-      if (mounted) setState(() => _syncing = false);
+      if (mounted) {
+        final shouldRefresh = _refreshQueued;
+        _refreshQueued = false;
+        setState(() => _syncing = false);
+        if (shouldRefresh) unawaited(_refresh());
+      }
     }
   }
 
   Future<void> _autoCheckInboxes() async {
-    if (_accounts.isEmpty || _syncing) return;
-    for (final account in _accounts) {
-      try {
-        final items = await _service.fetchInbox(account);
-        final unread = items.where((message) => message.unread).length;
-        final previous = _lastUnreadByEmail[account.email];
-        _lastUnreadByEmail[account.email] = unread;
-        if (previous != null && unread > previous) {
-          try {
-            await _notifications.showNewMail(unread - previous);
-          } catch (_) {}
+    if (!mounted || _accounts.isEmpty || _syncing) return;
+    final accounts = List<MailAccount>.of(_accounts);
+    final activeAccountId = _accounts[_active].id;
+    setState(() => _syncing = true);
+    try {
+      for (final account in accounts) {
+        try {
+          final isActiveInbox = account.id == activeAccountId &&
+              _folderPath.toUpperCase() == 'INBOX';
+          final items = isActiveInbox ? await _service.fetchInbox(account) : null;
+          final unread = items == null
+              ? await _service.countUnread(account)
+              : items.where((message) => message.unread).length;
+          if (!_accounts.any((saved) => saved.id == account.id)) continue;
+          final previous = _lastUnreadByEmail[account.id];
+          _lastUnreadByEmail[account.id] = unread;
+          if (previous != null && unread > previous) {
+            try {
+              await _notifications.showNewMail(unread - previous);
+            } catch (_) {}
+          }
+          if (items != null &&
+              mounted &&
+              _accounts.isNotEmpty &&
+              _accounts[_active].id == account.id &&
+              _folderPath.toUpperCase() == 'INBOX') {
+            setState(() {
+              _messages = items;
+              _selectedMail ??= items.isEmpty ? null : items.first;
+            });
+          }
+        } catch (_) {
+          // A temporary connection failure is retried at the next poll.
         }
-        if (mounted &&
-            account.email == _accounts[_active].email &&
-            _folderPath.toUpperCase() == 'INBOX') {
-          setState(() {
-            _messages = items;
-            _selectedMail ??= items.isEmpty ? null : items.first;
-          });
-        }
-      } catch (_) {
-        // A temporary connection failure is retried at the next poll.
+      }
+    } finally {
+      if (mounted) {
+        final shouldRefresh = _refreshQueued;
+        _refreshQueued = false;
+        setState(() => _syncing = false);
+        if (shouldRefresh) unawaited(_refresh());
       }
     }
   }
 
   Future<void> _loadFolders() async {
     if (_accounts.isEmpty) return;
+    final account = _accounts[_active];
     try {
-      final folders = await _service.listFolders(_accounts[_active]);
-      if (mounted) {
+      final folders = await _service.listFolders(account);
+      if (mounted &&
+          _accounts.isNotEmpty &&
+          _accounts[_active].id == account.id) {
         setState(() {
           _folders = folders;
           if (_folderPath != 'INBOX' &&
@@ -314,6 +367,10 @@ class _MailHomeState extends State<MailHome> with WindowListener {
   }
 
   Future<void> _addAccount() async {
+    if (_syncing) {
+      _notice('Please wait for the current mail check to finish.');
+      return;
+    }
     if (_accounts.length >= SecureAccountVault.maxAccounts) {
       _notice('You can add up to 10 accounts.');
       return;
@@ -322,6 +379,7 @@ class _MailHomeState extends State<MailHome> with WindowListener {
       MaterialPageRoute(builder: (_) => const AddAccountPage()),
     );
     if (account == null || !mounted) return;
+    var refreshAfterConnect = false;
     setState(() => _syncing = true);
     try {
       final verified = await _service.verify(account);
@@ -332,12 +390,16 @@ class _MailHomeState extends State<MailHome> with WindowListener {
         _active = _accounts.indexWhere((a) => a.id == verified.id);
         _messages = [];
       });
+      refreshAfterConnect = true;
       await _loadFolders();
-      await _refresh();
     } catch (e) {
       if (mounted) _notice(friendlyMailError(e));
     } finally {
       if (mounted) setState(() => _syncing = false);
+    }
+    if (refreshAfterConnect && mounted) {
+      _refreshQueued = false;
+      await _refresh();
     }
   }
 
@@ -1416,6 +1478,7 @@ class _MailHomeState extends State<MailHome> with WindowListener {
     );
     if (confirmed != true) return;
     await _vault.remove(account.email);
+    _lastUnreadByEmail.remove(account.id);
     if (!mounted) return;
     final wasActive = _active == index;
     final removedBeforeActive = index < _active;
@@ -1533,11 +1596,7 @@ class _AddAccountPageState extends State<AddAccountPage> {
   );
   void _submit() {
     final email = _email.text.trim();
-    final parts = email.split('@');
-    if (parts.length != 2 ||
-        parts.first.isEmpty ||
-        !parts.last.contains('.') ||
-        _password.text.isEmpty) {
+    if (!isValidMailAddress(email) || _password.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Enter a valid email address and password.'),
@@ -1623,7 +1682,7 @@ class _ComposePageState extends State<ComposePage> {
     ),
   );
   Future<void> _send() async {
-    if (!_to.text.contains('@')) {
+    if (!isValidMailAddress(_to.text)) {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(const SnackBar(content: Text('Enter a valid recipient.')));

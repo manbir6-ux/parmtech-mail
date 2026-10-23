@@ -1,14 +1,22 @@
+import 'dart:io';
+
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 class MailNotifications {
   final FlutterLocalNotificationsPlugin _plugin =
       FlutterLocalNotificationsPlugin();
+  bool _initialized = false;
 
   Future<void> initialize() async {
+    const darwinSettings = DarwinInitializationSettings(
+      requestAlertPermission: false,
+      requestBadgePermission: false,
+      requestSoundPermission: false,
+    );
     const settings = InitializationSettings(
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
-      iOS: DarwinInitializationSettings(),
-      macOS: DarwinInitializationSettings(),
+      iOS: darwinSettings,
+      macOS: darwinSettings,
       linux: LinuxInitializationSettings(defaultActionName: 'Open'),
       windows: WindowsInitializationSettings(
         appName: 'Parmtech Mail',
@@ -17,28 +25,43 @@ class MailNotifications {
       ),
     );
     await _plugin.initialize(settings: settings);
+    _initialized = true;
   }
 
   Future<bool> requestPermission() async {
-    final android = await _plugin
-        .resolvePlatformSpecificImplementation<
-          AndroidFlutterLocalNotificationsPlugin
-        >()
-        ?.requestNotificationsPermission();
-    final ios = await _plugin
-        .resolvePlatformSpecificImplementation<
-          IOSFlutterLocalNotificationsPlugin
-        >()
-        ?.requestPermissions(alert: true, badge: true, sound: true);
-    final mac = await _plugin
-        .resolvePlatformSpecificImplementation<
-          MacOSFlutterLocalNotificationsPlugin
-        >()
-        ?.requestPermissions(alert: true, badge: true, sound: true);
-    return android ?? ios ?? mac ?? false;
+    if (!_initialized) return false;
+    if (Platform.isAndroid) {
+      return await _plugin
+              .resolvePlatformSpecificImplementation<
+                AndroidFlutterLocalNotificationsPlugin
+              >()
+              ?.requestNotificationsPermission() ??
+          false;
+    }
+    if (Platform.isIOS) {
+      return await _plugin
+              .resolvePlatformSpecificImplementation<
+                IOSFlutterLocalNotificationsPlugin
+              >()
+              ?.requestPermissions(alert: true, badge: true, sound: true) ??
+          false;
+    }
+    if (Platform.isMacOS) {
+      return await _plugin
+              .resolvePlatformSpecificImplementation<
+                MacOSFlutterLocalNotificationsPlugin
+              >()
+              ?.requestPermissions(alert: true, badge: true, sound: true) ??
+          false;
+    }
+
+    // Windows and Linux deliver notifications through their desktop services;
+    // neither plugin exposes a matching runtime permission prompt.
+    return Platform.isWindows || Platform.isLinux;
   }
 
   Future<void> showNewMail(int count) async {
+    if (!_initialized || count <= 0) return;
     const details = NotificationDetails(
       android: AndroidNotificationDetails(
         'mail_updates',

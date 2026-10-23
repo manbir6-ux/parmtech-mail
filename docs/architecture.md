@@ -8,8 +8,8 @@ Flutter gives Android and iOS one shared product codebase. Keep platform-specifi
 
 1. User enters email and mailbox password.
 2. Derive the domain and probe common secure IMAP/SMTP endpoints, preferring the Namecheap/cPanel server details available to the app.
-3. For the supplied cPanel account, attempt `parmtech.au` first and `premium214.web-hosting.com` second; ports IMAP 993 and SMTP 465, implicit TLS.
-4. Authenticate against IMAP and SMTP. Never weaken TLS or accept invalid certificates to make a connection succeed.
+3. For the supplied cPanel account, try the cPanel URL hostname `premium214.web-hosting.com` first, then the domain listed in cPanel, `parmtech.au`; ports are IMAP 993 and SMTP 465 with implicit TLS.
+4. Verify the mailbox password against IMAP before saving. SMTP authentication is used when sending. Never weaken TLS or accept invalid certificates to make a connection succeed.
 5. Store credentials in iOS Keychain / Android Keystore-backed secure storage; persist only account metadata elsewhere.
 6. Keep sessions until explicit account removal, password change, or server-side rejection. Provide re-authentication for rejected credentials.
 
@@ -27,9 +27,9 @@ Use IMAP for folders, message flags, and synchronization; SMTP for sending. Cach
 
 ## Implemented transport
 
-`CpanelMailService` uses the `enough_mail` Dart IMAP/SMTP client directly from the device. It connects with implicit TLS and standard ports (IMAP 993 / SMTP 465). Host candidates are tried only when the socket/TLS connection fails; the first successful IMAP login is stored in the secure vault. An authentication error is not treated as a server-name problem. Message bodies and credentials are not sent to a ParmTech server.
+`CpanelMailService` uses the `enough_mail` Dart IMAP/SMTP client directly from the device. It connects with implicit TLS and standard ports (IMAP 993 / SMTP 465), uses finite connection and message-fetch timeouts, and closes sessions on both success and failure. Host candidates are tried only when the socket/TLS connection fails; the first successful IMAP login is stored in the secure vault. An authentication error is not treated as a server-name problem. Message bodies and credentials are not sent to a ParmTech server.
 
-Foreground sync can raise a local notification after a later sync detects a higher unread count. This is not background delivery: shared-hosting IMAP has no generic push guarantee, and this build does not run a server-side watcher.
+The app checks all saved accounts every five minutes while the app process is running. It uses IMAP SEARCH for unread counts on inactive accounts and refreshes message bodies only for the active inbox. A local notification can be raised when a later check detects more unread messages. Mobile operating systems may suspend timers in the background, so this is not guaranteed background delivery; shared-hosting IMAP has no generic push guarantee and this app does not run a server-side watcher.
 
 ## Suggested next modules
 

@@ -10,6 +10,7 @@ class MailItem {
     required this.time,
     required this.unread,
   });
+
   final String sender;
   final String subject;
   final String body;
@@ -23,6 +24,7 @@ class MailFolder {
     required this.path,
     required this.unread,
   });
+
   final String name;
   final String path;
   final int unread;
@@ -30,53 +32,31 @@ class MailFolder {
 
 /// Direct, device-to-provider IMAP/SMTP transport. TLS validation stays enabled.
 /// Host fallback happens only when the TCP/TLS connection itself fails; an
-/// authentication rejection is returned immediately so a bad password is not
-/// retried against unrelated endpoints.
+/// authentication rejection is returned immediately.
 class CpanelMailService {
+  static const _connectTimeout = Duration(seconds: 20);
+  static const _responseTimeout = Duration(seconds: 25);
+
   Future<model.MailAccount> verify(model.MailAccount account) async {
-    final connectionErrors = <String>[];
-    for (final candidate in model.cPanelHostCandidates(account.email)) {
-      final client = mail.ImapClient(isLogEnabled: false);
-      try {
-        await client.connectToServer(
-          candidate.host,
-          model.MailAccount.imapPort,
-          isSecure: true,
-        );
-      } catch (error) {
-        connectionErrors.add('${candidate.host}: $error');
-        continue;
-      }
-      try {
-        await client.login(account.email.trim(), account.password);
-        await client.selectInbox();
-        await client.logout();
-        return model.MailAccount(
-          email: account.email.trim(),
-          password: account.password,
-          imapHost: candidate.host,
-          smtpHost: candidate.host,
-          displayName: account.displayName,
-        );
-      } catch (_) {
-        rethrow;
-      }
+    final session = await _connectAndLogin(account);
+    try {
+      await session.client.selectInbox();
+      return model.MailAccount(
+        email: account.email.trim(),
+        password: account.password,
+        imapHost: session.host,
+        smtpHost: session.host,
+        displayName: account.displayName,
+      );
+    } finally {
+      await _closeImap(session.client);
     }
-    throw MailConnectionException(
-      'Could not reach a secure IMAP server. ${connectionErrors.join('; ')}',
-    );
   }
 
   Future<List<MailFolder>> listFolders(model.MailAccount account) async {
-    final client = mail.ImapClient(isLogEnabled: false);
-    await client.connectToServer(
-      account.imapHost,
-      model.MailAccount.imapPort,
-      isSecure: true,
-    );
+    final session = await _connectAndLogin(account);
     try {
-      await client.login(account.email, account.password);
-      final boxes = await client.listMailboxes(recursive: true);
+      final boxes = await session.client.listMailboxes(recursive: true);
       return boxes
           .map(
             (box) => MailFolder(
@@ -87,7 +67,7 @@ class CpanelMailService {
           )
           .toList(growable: false);
     } finally {
-      await client.logout();
+      await _closeImap(session.client);
     }
   }
 
@@ -96,27 +76,38 @@ class CpanelMailService {
     int count = 40,
   }) => fetchFolder(account, 'INBOX', count: count);
 
+  /// Gets an accurate server-side unread count without downloading message
+  /// bodies. This keeps background polling lightweight across multiple accounts.
+  Future<int> countUnread(model.MailAccount account) async {
+    final session = await _connectAndLogin(account);
+    try {
+      await session.client.selectInbox();
+      final result = await session.client.searchMessages(
+        searchCriteria: 'UNSEEN',
+        responseTimeout: _responseTimeout,
+      );
+      return result.count ?? 0;
+    } finally {
+      await _closeImap(session.client);
+    }
+  }
+
   Future<List<MailItem>> fetchFolder(
     model.MailAccount account,
     String folderPath, {
     int count = 40,
   }) async {
-    final client = mail.ImapClient(isLogEnabled: false);
-    await client.connectToServer(
-      account.imapHost,
-      model.MailAccount.imapPort,
-      isSecure: true,
-    );
+    final session = await _connectAndLogin(account);
     try {
-      await client.login(account.email, account.password);
       if (folderPath.toUpperCase() == 'INBOX') {
-        await client.selectInbox();
+        await session.client.selectInbox();
       } else {
-        await client.selectMailboxByPath(folderPath);
+        await session.client.selectMailboxByPath(folderPath);
       }
-      final result = await client.fetchRecentMessages(
+      final result = await session.client.fetchRecentMessages(
         messageCount: count,
         criteria: 'BODY.PEEK[]',
+        responseTimeout: _responseTimeout,
       );
       return result.messages.reversed
           .map((message) {
@@ -135,7 +126,7 @@ class CpanelMailService {
           })
           .toList(growable: false);
     } finally {
-      await client.logout();
+      await _closeImap(session.client);
     }
   }
 
@@ -146,10 +137,11 @@ class CpanelMailService {
     required String body,
   }) async {
     final candidates = <String>{
-      account.smtpHost,
       ...model.cPanelHostCandidates(account.email).map((e) => e.host),
+      account.smtpHost,
     };
-    Object? lastConnectionError;
+    final connectionErrors = <String>[];
+
     for (final host in candidates) {
       final client = mail.SmtpClient(host, isLogEnabled: false);
       try {
@@ -157,22 +149,27 @@ class CpanelMailService {
           host,
           model.MailAccount.smtpPort,
           isSecure: true,
+          timeout: _connectTimeout,
         );
       } catch (error) {
-        lastConnectionError = error;
+        connectionErrors.add('$host: $error');
+        try {
+          await client.disconnect();
+        } catch (_) {}
         continue;
       }
+
       try {
         await client.ehlo();
         if (client.serverInfo.supportsAuth(mail.AuthMechanism.plain)) {
           await client.authenticate(
-            account.email,
+            account.email.trim(),
             account.password,
             mail.AuthMechanism.plain,
           );
         } else if (client.serverInfo.supportsAuth(mail.AuthMechanism.login)) {
           await client.authenticate(
-            account.email,
+            account.email.trim(),
             account.password,
             mail.AuthMechanism.login,
           );
@@ -181,30 +178,98 @@ class CpanelMailService {
             'The outgoing server does not offer password authentication.',
           );
         }
+
         final message =
             mail.MessageBuilder.prepareMultipartAlternativeMessage(
                 plainText: body,
                 htmlText:
                     '<p>${_escapeHtml(body).replaceAll('\n', '<br>')}</p>',
               )
-              ..from = [mail.MailAddress('', account.email)]
-              ..to = [mail.MailAddress('', to)]
+              ..from = [mail.MailAddress('', account.email.trim())]
+              ..to = [mail.MailAddress('', to.trim())]
               ..subject = subject;
+
         final response = await client.sendMessage(message.buildMimeMessage());
         if (!response.isOkStatus) {
           throw const MailConnectionException(
             'The outgoing server rejected the message.',
           );
         }
-        await client.quit();
         return;
+      } finally {
+        await _closeSmtp(client);
+      }
+    }
+
+    throw MailConnectionException(
+      'Could not reach a secure SMTP server. ${connectionErrors.join('; ')}',
+    );
+  }
+
+  Future<_ImapSession> _connectAndLogin(model.MailAccount account) async {
+    final hosts = <String>{
+      ...model.cPanelHostCandidates(account.email).map((candidate) => candidate.host),
+      account.imapHost,
+    }.where((host) => host.trim().isNotEmpty);
+    final connectionErrors = <String>[];
+
+    for (final host in hosts) {
+      final client = mail.ImapClient(isLogEnabled: false);
+      try {
+        await _connectImap(client, host);
+      } catch (error) {
+        connectionErrors.add('$host: $error');
+        continue;
+      }
+
+      try {
+        await client.login(account.email.trim(), account.password);
+        return _ImapSession(client, host);
       } catch (_) {
+        await _closeImap(client);
         rethrow;
       }
     }
+
     throw MailConnectionException(
-      'Could not reach a secure SMTP server. ${lastConnectionError ?? ''}',
+      'Could not reach a secure IMAP server. ${connectionErrors.join('; ')}',
     );
+  }
+
+  Future<void> _connectImap(mail.ImapClient client, String host) async {
+    try {
+      await client.connectToServer(
+        host,
+        model.MailAccount.imapPort,
+        isSecure: true,
+        timeout: _connectTimeout,
+      );
+    } catch (_) {
+      try {
+        await client.disconnect();
+      } catch (_) {}
+      rethrow;
+    }
+  }
+
+  Future<void> _closeImap(mail.ImapClient client) async {
+    try {
+      await client.logout();
+    } catch (_) {
+      try {
+        await client.disconnect();
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _closeSmtp(mail.SmtpClient client) async {
+    try {
+      await client.quit();
+    } catch (_) {
+      try {
+        await client.disconnect();
+      } catch (_) {}
+    }
   }
 
   String _escapeHtml(String value) => value
@@ -215,22 +280,41 @@ class CpanelMailService {
       .replaceAll("'", '&#39;');
 }
 
+class _ImapSession {
+  const _ImapSession(this.client, this.host);
+
+  final mail.ImapClient client;
+  final String host;
+}
+
 class MailConnectionException implements Exception {
   const MailConnectionException(this.message);
+
   final String message;
+
   @override
   String toString() => message;
 }
 
 String friendlyMailError(Object error) {
   final text = error.toString().replaceFirst('Exception: ', '').trim();
-  if (text.toLowerCase().contains('auth') ||
-      text.toLowerCase().contains('login')) {
+  final lower = text.toLowerCase();
+
+  if (lower.contains('auth') ||
+      lower.contains('login') ||
+      lower.contains('credential')) {
     return 'Email or password was rejected. Check the mailbox password in cPanel.';
   }
-  if (text.toLowerCase().contains('certificate') ||
-      text.toLowerCase().contains('handshake')) {
-    return 'Secure TLS connection failed. Check the server certificate and hostname.';
+  if (lower.contains('certificate') || lower.contains('handshake')) {
+    return 'Secure TLS connection failed. Check the hosting server and its certificate.';
+  }
+  if (lower.contains('timeout') || lower.contains('timed out')) {
+    return 'The mail server did not respond in time. Check your connection and try again.';
+  }
+  if (lower.contains('host lookup') ||
+      lower.contains('socketfailed') ||
+      lower.contains('no address associated with hostname')) {
+    return 'The mail server name could not be resolved. Check your internet connection and hosting server settings.';
   }
   return text;
 }

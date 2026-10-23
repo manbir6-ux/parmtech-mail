@@ -22,4 +22,14 @@ void main() {
     );
     expect(account.id, 'info@parmtech.au');
   });
+
+  test('mail addresses reject malformed domains before connecting', () {
+    expect(isValidMailAddress('info@parmtech.au'), isTrue);
+    expect(isValidMailAddress(' sales+au@parmtech.au '), isTrue);
+    expect(isValidMailAddress('info@@parmtech.au'), isFalse);
+    expect(isValidMailAddress('info@parmtech'), isFalse);
+    expect(isValidMailAddress('info@-parmtech.au'), isFalse);
+    expect(isValidMailAddress('info@parmtech..au'), isFalse);
+    expect(isValidMailAddress(''), isFalse);
+  });
 }

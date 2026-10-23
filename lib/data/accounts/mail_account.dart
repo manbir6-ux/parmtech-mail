@@ -40,9 +40,8 @@ class MailServerCandidate {
   final String host;
 }
 
-/// Uses only server names shown in this account's cPanel evidence.
-/// Prefer the hosting server hostname from the cPanel URL because the domain
-/// hostname currently has no DNS address; use the domain name only as fallback.
+/// Uses only server names shown in this account's cPanel settings.
+/// Prefer its hosting-server hostname, then try the domain shown by cPanel.
 List<MailServerCandidate> cPanelHostCandidates(String email) {
   final domain = email.trim().split('@').last.toLowerCase();
   if (domain.isEmpty || !domain.contains('.')) return const [];
@@ -54,4 +53,35 @@ List<MailServerCandidate> cPanelHostCandidates(String email) {
     ];
   }
   return [MailServerCandidate(domain)];
+}
+
+bool isValidMailAddress(String value) {
+  final email = value.trim();
+  if (email.isEmpty || email.length > 254) return false;
+
+  final at = email.indexOf('@');
+  if (at <= 0 || at != email.lastIndexOf('@') || at == email.length - 1) {
+    return false;
+  }
+
+  final local = email.substring(0, at);
+  final domain = email.substring(at + 1);
+  if (local.length > 64 ||
+      local.startsWith('.') ||
+      local.endsWith('.') ||
+      local.contains('..') ||
+      local.contains(RegExp(r'\s'))) {
+    return false;
+  }
+
+  final labels = domain.split('.');
+  if (labels.length < 2) return false;
+  return labels.every(
+    (label) =>
+        label.isNotEmpty &&
+        label.length <= 63 &&
+        !label.startsWith('-') &&
+        !label.endsWith('-') &&
+        RegExp(r'^[a-zA-Z0-9-]+$').hasMatch(label),
+  );
 }

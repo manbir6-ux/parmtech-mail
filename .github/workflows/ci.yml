@@ -19,6 +19,8 @@ jobs:
       - run: flutter create . --platforms=android,ios,windows,macos,linux
       - name: Prepare generated Android project
         run: python3 tool/prepare_android.py
+      - name: Prepare generated macOS project
+        run: python3 tool/prepare_macos.py
       - name: Test Android build preparation
         run: python3 -m unittest discover -s tool -p 'test_*.py' -v
       - run: flutter pub get

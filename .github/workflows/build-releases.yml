@@ -99,6 +99,8 @@ jobs:
       - uses: subosito/flutter-action@v2
         with: { channel: stable, cache: true }
       - run: flutter create . --platforms=macos
+      - name: Enable macOS outgoing mail connections
+        run: python3 tool/prepare_macos.py
       - run: flutter pub get
       - run: flutter build macos --release
       - run: hdiutil create -volname "ParmTech Mail" -srcfolder build/macos/Build/Products/Release/parm_mail.app -ov -format UDZO ParmTech-Mail-macOS.dmg

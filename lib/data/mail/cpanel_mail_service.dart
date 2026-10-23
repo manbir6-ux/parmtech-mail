@@ -232,5 +232,5 @@ String friendlyMailError(Object error) {
       text.toLowerCase().contains('handshake')) {
     return 'Secure TLS connection failed. Check the server certificate and hostname.';
   }
-  return text.length > 170 ? '${text.substring(0, 167)}…' : text;
+  return text;
 }

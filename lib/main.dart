@@ -1231,8 +1231,8 @@ class _MailHomeState extends State<MailHome>
                 ),
                 const SizedBox(width: 8),
                 if (mail.unread)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 6),
+                  const Padding(
+                    padding: EdgeInsets.only(top: 6),
                     child: Icon(Icons.circle, size: 9, color: _orange),
                   ),
               ],

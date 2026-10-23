@@ -1,32 +1,54 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
+import 'package:tray_manager/tray_manager.dart' as tray;
+import 'package:window_manager/window_manager.dart';
 import 'data/accounts/mail_account.dart';
 import 'data/accounts/secure_account_vault.dart';
 import 'data/mail/cpanel_mail_service.dart';
 import 'data/notifications/mail_notifications.dart';
 
-void main() => runApp(const ParmMailApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  if (Platform.isWindows) await windowManager.ensureInitialized();
+  runApp(const ParmMailApp());
+}
 
-const _ink = Color(0xFF0D1012);
-const _panel = Color(0xFF171B1E);
-const _orange = Color(0xFF17B9F2);
-const _muted = Color(0xFF99A2A6);
+bool _darkTheme = true;
+Color get _ink =>
+    _darkTheme ? const Color(0xFF101719) : const Color(0xFFF3F7F6);
+Color get _panel => _darkTheme ? const Color(0xFF192224) : Colors.white;
+const _orange = Color(0xFF16B89A);
+const _muted = Color(0xFF788681);
 
-class ParmMailApp extends StatelessWidget {
+class ParmMailApp extends StatefulWidget {
   const ParmMailApp({super.key});
+
+  @override
+  State<ParmMailApp> createState() => _ParmMailAppState();
+}
+
+class _ParmMailAppState extends State<ParmMailApp> {
+  void _toggleTheme() => setState(() {
+    _darkTheme = !_darkTheme;
+  });
+
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'ParmTech Mail',
+    title: 'Parmtech Mail',
     debugShowCheckedModeBanner: false,
+    themeMode: _darkTheme ? ThemeMode.dark : ThemeMode.light,
     theme: ThemeData(
       useMaterial3: true,
-      brightness: Brightness.dark,
+      brightness: Brightness.light,
       scaffoldBackgroundColor: _ink,
       colorScheme: ColorScheme.fromSeed(
         seedColor: _orange,
-        brightness: Brightness.dark,
+        brightness: Brightness.light,
         surface: _panel,
       ),
-      appBarTheme: const AppBarTheme(backgroundColor: _ink, elevation: 0),
+      appBarTheme: AppBarTheme(backgroundColor: _ink, elevation: 0),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: _panel,
@@ -36,17 +58,37 @@ class ParmMailApp extends StatelessWidget {
         ),
       ),
     ),
-    home: const MailHome(),
+    darkTheme: ThemeData(
+      useMaterial3: true,
+      brightness: Brightness.dark,
+      scaffoldBackgroundColor: _ink,
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: _orange,
+        brightness: Brightness.dark,
+        surface: _panel,
+      ),
+      appBarTheme: AppBarTheme(backgroundColor: _ink, elevation: 0),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: _panel,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide.none,
+        ),
+      ),
+    ),
+    home: MailHome(onThemeToggle: _toggleTheme),
   );
 }
 
 class MailHome extends StatefulWidget {
-  const MailHome({super.key});
+  const MailHome({super.key, required this.onThemeToggle});
+  final VoidCallback onThemeToggle;
   @override
   State<MailHome> createState() => _MailHomeState();
 }
 
-class _MailHomeState extends State<MailHome> {
+class _MailHomeState extends State<MailHome> with WindowListener {
   final _vault = SecureAccountVault();
   final _service = CpanelMailService();
   final _notifications = MailNotifications();
@@ -57,21 +99,97 @@ class _MailHomeState extends State<MailHome> {
   bool _loading = true;
   bool _syncing = false;
   String? _error;
-  bool _hasSynced = false;
   String _folderPath = 'INBOX';
   bool _searchOpen = false;
   final _search = TextEditingController();
+  final Map<String, int> _lastUnreadByEmail = {};
+  Timer? _autoSyncTimer;
+  tray.TrayIcon? _trayIcon;
+  MailItem? _selectedMail;
+  bool _quitting = false;
 
   @override
   void initState() {
     super.initState();
+    if (Platform.isWindows) {
+      windowManager.addListener(this);
+      unawaited(_setupWindowsTray());
+    }
     _restore();
   }
 
   @override
   void dispose() {
     _search.dispose();
+    _autoSyncTimer?.cancel();
+    if (Platform.isWindows) windowManager.removeListener(this);
     super.dispose();
+  }
+
+  Future<void> _setupWindowsTray() async {
+    try {
+      windowManager.setPreventClose(true);
+      windowManager.setTitle('Parmtech Mail');
+      final icon = tray.TrayIcon.create();
+      if (icon == null) return;
+      icon.icon = tray.ImageAsset.fromAsset('assets/parmtech-mark.png');
+      icon.setTooltip('Parmtech Mail');
+      icon.addListener((event) {
+        if (event is tray.TrayIconClickedEvent ||
+            event is tray.TrayIconDoubleClickedEvent) {
+          unawaited(_showFromTray());
+        }
+      });
+
+      final menu = tray.Menu.create();
+      final open = tray.MenuItem.createWithLabelAndType(
+        'Open Parmtech Mail',
+        tray.MenuItemType.normal,
+      );
+      final quit = tray.MenuItem.createWithLabelAndType(
+        'Quit Parmtech Mail',
+        tray.MenuItemType.normal,
+      );
+      if (menu == null || open == null || quit == null) return;
+      open.addListener((event) {
+        if (event is tray.MenuItemClickedEvent) unawaited(_showFromTray());
+      });
+      quit.addListener((event) {
+        if (event is tray.MenuItemClickedEvent) unawaited(_quitFromTray());
+      });
+      menu.addItem(open);
+      menu.addSeparator();
+      menu.addItem(quit);
+      icon.setContextMenu(menu);
+      icon.setVisible(true);
+      _trayIcon = icon;
+    } catch (_) {
+      // Tray support must not prevent the inbox from opening.
+    }
+  }
+
+  Future<void> _showFromTray() async {
+    windowManager.show();
+    windowManager.focus();
+  }
+
+  Future<void> _quitFromTray() async {
+    _quitting = true;
+    _autoSyncTimer?.cancel();
+    final icon = _trayIcon;
+    if (icon != null) {
+      icon.setVisible(false);
+      icon.dispose();
+      _trayIcon = null;
+    }
+    windowManager.setPreventClose(false);
+    windowManager.close();
+  }
+
+  @override
+  void onWindowClose() {
+    // Keep mail polling and notifications alive when the user closes the window.
+    if (!_quitting) unawaited(windowManager.hide());
   }
 
   Future<void> _restore() async {
@@ -91,6 +209,11 @@ class _MailHomeState extends State<MailHome> {
         await _loadFolders();
         await _refresh();
       }
+      _autoSyncTimer?.cancel();
+      _autoSyncTimer = Timer.periodic(
+        const Duration(minutes: 5),
+        (_) => unawaited(_autoCheckInboxes()),
+      );
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -103,17 +226,17 @@ class _MailHomeState extends State<MailHome> {
   }
 
   Future<void> _refresh() async {
-    if (_accounts.isEmpty) return;
+    if (_accounts.isEmpty || _syncing) return;
     setState(() {
       _syncing = true;
       _error = null;
     });
     try {
       final items = await _service.fetchFolder(_accounts[_active], _folderPath);
-      final previousUnread = _messages.where((m) => m.unread).length;
       final currentUnread = items.where((m) => m.unread).length;
+      final previousUnread = _lastUnreadByEmail[_accounts[_active].email];
       if (_folderPath.toUpperCase() == 'INBOX' &&
-          _hasSynced &&
+          previousUnread != null &&
           currentUnread > previousUnread) {
         try {
           await _notifications.showNewMail(currentUnread - previousUnread);
@@ -121,12 +244,46 @@ class _MailHomeState extends State<MailHome> {
           /* Notification permission is optional. */
         }
       }
-      _hasSynced = true;
-      if (mounted) setState(() => _messages = items);
+      if (_folderPath.toUpperCase() == 'INBOX') {
+        _lastUnreadByEmail[_accounts[_active].email] = currentUnread;
+      }
+      if (mounted) {
+        setState(() {
+          _messages = items;
+          _selectedMail ??= items.isEmpty ? null : items.first;
+        });
+      }
     } catch (e) {
       if (mounted) setState(() => _error = friendlyMailError(e));
     } finally {
       if (mounted) setState(() => _syncing = false);
+    }
+  }
+
+  Future<void> _autoCheckInboxes() async {
+    if (_accounts.isEmpty || _syncing) return;
+    for (final account in _accounts) {
+      try {
+        final items = await _service.fetchInbox(account);
+        final unread = items.where((message) => message.unread).length;
+        final previous = _lastUnreadByEmail[account.email];
+        _lastUnreadByEmail[account.email] = unread;
+        if (previous != null && unread > previous) {
+          try {
+            await _notifications.showNewMail(unread - previous);
+          } catch (_) {}
+        }
+        if (mounted &&
+            account.email == _accounts[_active].email &&
+            _folderPath.toUpperCase() == 'INBOX') {
+          setState(() {
+            _messages = items;
+            _selectedMail ??= items.isEmpty ? null : items.first;
+          });
+        }
+      } catch (_) {
+        // A temporary connection failure is retried at the next poll.
+      }
     }
   }
 
@@ -152,7 +309,6 @@ class _MailHomeState extends State<MailHome> {
     setState(() {
       _folderPath = folder.path;
       _messages = [];
-      _hasSynced = false;
     });
     await _refresh();
   }
@@ -175,7 +331,6 @@ class _MailHomeState extends State<MailHome> {
         _accounts = [..._accounts.where((a) => a.id != verified.id), verified];
         _active = _accounts.indexWhere((a) => a.id == verified.id);
         _messages = [];
-        _hasSynced = false;
       });
       await _loadFolders();
       await _refresh();
@@ -245,7 +400,7 @@ class _MailHomeState extends State<MailHome> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'PARMTECH  /  MAIL',
+              'PARMTECH MAIL',
               style: TextStyle(
                 color: _orange,
                 fontWeight: FontWeight.w900,
@@ -283,35 +438,51 @@ class _MailHomeState extends State<MailHome> {
             tooltip: 'Accounts',
             icon: const Icon(Icons.account_circle_outlined),
           ),
+          IconButton(
+            onPressed: widget.onThemeToggle,
+            tooltip: _darkTheme
+                ? 'Switch to light mode'
+                : 'Switch to dark mode',
+            icon: Icon(
+              _darkTheme ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+            ),
+          ),
           const SizedBox(width: 8),
         ],
       ),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : Column(
-              children: [
-                _header(account),
-                if (_error != null) _errorCard(),
-                if (_searchOpen && _accounts.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
-                    child: TextField(
-                      controller: _search,
-                      onChanged: (_) => setState(() {}),
-                      decoration: const InputDecoration(
-                        hintText: 'Search sender, subject or message',
-                        prefixIcon: Icon(Icons.search_rounded),
+          : LayoutBuilder(
+              builder: (context, constraints) {
+                if (constraints.maxWidth >= 1120 && _accounts.isNotEmpty) {
+                  return _desktopLayout(account);
+                }
+                return Column(
+                  children: [
+                    _header(account),
+                    if (_error != null) _errorCard(),
+                    if (_searchOpen && _accounts.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(18, 0, 18, 10),
+                        child: TextField(
+                          controller: _search,
+                          onChanged: (_) => setState(() {}),
+                          decoration: const InputDecoration(
+                            hintText: 'Search sender, subject or message',
+                            prefixIcon: Icon(Icons.search_rounded),
+                          ),
+                        ),
                       ),
+                    Expanded(
+                      child: _accounts.isEmpty
+                          ? _welcome()
+                          : _messages.isEmpty && !_syncing
+                          ? _emptyInbox()
+                          : _messageList(),
                     ),
-                  ),
-                Expanded(
-                  child: _accounts.isEmpty
-                      ? _welcome()
-                      : _messages.isEmpty && !_syncing
-                      ? _emptyInbox()
-                      : _messageList(),
-                ),
-              ],
+                  ],
+                );
+              },
             ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _compose,
@@ -322,6 +493,405 @@ class _MailHomeState extends State<MailHome> {
           'Compose',
           style: TextStyle(fontWeight: FontWeight.w800),
         ),
+      ),
+    );
+  }
+
+  Widget _desktopLayout(MailAccount? account) {
+    final query = _search.text.trim().toLowerCase();
+    final visibleMessages = query.isEmpty
+        ? _messages
+        : _messages
+              .where(
+                (message) =>
+                    '${message.sender} ${message.subject} ${message.body}'
+                        .toLowerCase()
+                        .contains(query),
+              )
+              .toList();
+    final selected =
+        _selectedMail != null && visibleMessages.contains(_selectedMail)
+        ? _selectedMail
+        : (visibleMessages.isEmpty ? null : visibleMessages.first);
+
+    return Row(
+      children: [
+        Container(
+          width: 232,
+          decoration: BoxDecoration(
+            color: _darkTheme
+                ? const Color(0xFF141D1F)
+                : const Color(0xFFEAF1EF),
+            border: Border(
+              right: BorderSide(
+                color: _darkTheme ? Colors.white10 : Colors.black12,
+              ),
+            ),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 22, 18, 18),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: _orange,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: const Icon(
+                          Icons.mark_email_unread_rounded,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(width: 11),
+                      const Expanded(
+                        child: Text(
+                          'Parmtech Mail',
+                          style: TextStyle(
+                            fontSize: 17,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
+                  child: FilledButton.icon(
+                    onPressed: _compose,
+                    icon: const Icon(Icons.edit_rounded, size: 18),
+                    label: const Text('Compose'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: _orange,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                _desktopNavTile(
+                  Icons.inbox_rounded,
+                  'Inbox',
+                  _folderPath.toUpperCase() == 'INBOX',
+                  () {
+                    setState(() {
+                      _folderPath = 'INBOX';
+                      _messages = [];
+                    });
+                    _refresh();
+                  },
+                ),
+                for (final folder
+                    in _folders
+                        .where((folder) => folder.path.toUpperCase() != 'INBOX')
+                        .take(8))
+                  _desktopNavTile(
+                    _folderIcon(folder),
+                    _folderTitle(folder),
+                    folder.path == _folderPath,
+                    () => _selectFolder(folder),
+                    trailing: folder.unread > 0 ? '${folder.unread}' : null,
+                  ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 18, 20, 8),
+                  child: Text(
+                    'ACCOUNTS',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 1.4,
+                      color: _muted,
+                    ),
+                  ),
+                ),
+                for (final mailbox in _accounts)
+                  ListTile(
+                    dense: true,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 18),
+                    leading: CircleAvatar(
+                      radius: 14,
+                      backgroundColor: _orange.withValues(alpha: .16),
+                      child: Text(
+                        mailbox.email[0].toUpperCase(),
+                        style: const TextStyle(
+                          color: _orange,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                    ),
+                    title: Text(
+                      mailbox.email,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                    selected: mailbox.email == account?.email,
+                    onTap: () {
+                      setState(() {
+                        _active = _accounts.indexOf(mailbox);
+                        _folderPath = 'INBOX';
+                        _messages = [];
+                        _selectedMail = null;
+                      });
+                      _loadFolders().then((_) => _refresh());
+                    },
+                  ),
+                const Spacer(),
+                ListTile(
+                  leading: const Icon(Icons.add_rounded),
+                  title: const Text('Add account'),
+                  onTap: _addAccount,
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 18),
+                  child: Text(
+                    'Secure IMAP  ·  Up to 10 accounts',
+                    style: TextStyle(fontSize: 10, color: _muted),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 18, 24, 16),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            _activeFolderName,
+                            style: const TextStyle(
+                              fontSize: 25,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: -.5,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            account?.email ?? '',
+                            style: TextStyle(fontSize: 12, color: _muted),
+                          ),
+                        ],
+                      ),
+                    ),
+                    SizedBox(
+                      width: 300,
+                      child: TextField(
+                        controller: _search,
+                        onChanged: (_) => setState(() {}),
+                        decoration: const InputDecoration(
+                          hintText: 'Search mail',
+                          prefixIcon: Icon(Icons.search_rounded),
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    IconButton.filledTonal(
+                      onPressed: _syncing ? null : _refresh,
+                      tooltip: 'Check mail now',
+                      icon: _syncing
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.sync_rounded),
+                    ),
+                  ],
+                ),
+              ),
+              if (_error != null) _errorCard(),
+              Expanded(
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 390,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          border: Border(
+                            right: BorderSide(
+                              color: _darkTheme
+                                  ? Colors.white10
+                                  : Colors.black12,
+                            ),
+                          ),
+                        ),
+                        child: _syncing && _messages.isEmpty
+                            ? const Center(child: CircularProgressIndicator())
+                            : visibleMessages.isEmpty
+                            ? _emptyInbox()
+                            : ListView.separated(
+                                padding: const EdgeInsets.fromLTRB(
+                                  12,
+                                  6,
+                                  12,
+                                  18,
+                                ),
+                                itemCount: visibleMessages.length,
+                                separatorBuilder: (_, _) =>
+                                    const SizedBox(height: 7),
+                                itemBuilder: (context, index) {
+                                  final mail = visibleMessages[index];
+                                  return _tile(
+                                    mail,
+                                    selected: mail == selected,
+                                    onTap: () =>
+                                        setState(() => _selectedMail = mail),
+                                  );
+                                },
+                              ),
+                      ),
+                    ),
+                    Expanded(child: _desktopMessagePreview(selected)),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(22, 8, 22, 12),
+                child: Text(
+                  _syncing
+                      ? 'Checking for new mail…'
+                      : 'Auto-checks every 5 minutes  ·  ${_messages.length} messages loaded',
+                  style: TextStyle(fontSize: 11, color: _muted),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _desktopNavTile(
+    IconData icon,
+    String label,
+    bool selected,
+    VoidCallback onTap, {
+    String? trailing,
+  }) => ListTile(
+    dense: true,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 18),
+    leading: Icon(icon, size: 19, color: selected ? _orange : _muted),
+    title: Text(
+      label,
+      style: TextStyle(
+        fontSize: 13,
+        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+      ),
+    ),
+    trailing: trailing == null
+        ? null
+        : Text(
+            trailing,
+            style: const TextStyle(
+              color: _orange,
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+    selected: selected,
+    selectedTileColor: _orange.withValues(alpha: .1),
+    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    onTap: onTap,
+  );
+
+  Widget _desktopMessagePreview(MailItem? mail) {
+    if (mail == null)
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.mark_email_read_outlined, size: 52, color: _muted),
+            const SizedBox(height: 14),
+            Text(
+              'Select a message to read',
+              style: TextStyle(color: _muted, fontSize: 15),
+            ),
+          ],
+        ),
+      );
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(30, 28, 34, 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  mail.subject,
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.w800,
+                    height: 1.2,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: 'More actions',
+                onPressed: () {},
+                icon: const Icon(Icons.more_horiz_rounded),
+              ),
+            ],
+          ),
+          const SizedBox(height: 22),
+          Row(
+            children: [
+              CircleAvatar(
+                backgroundColor: _orange.withValues(alpha: .2),
+                foregroundColor: _orange,
+                child: Text(
+                  mail.sender.trim().isEmpty
+                      ? '?'
+                      : mail.sender.trim()[0].toUpperCase(),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      mail.sender,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    Text(
+                      mail.time.isEmpty ? 'From your mailbox' : mail.time,
+                      style: TextStyle(fontSize: 11, color: _muted),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const Divider(height: 32),
+          Expanded(
+            child: SingleChildScrollView(
+              child: SelectableText(
+                mail.body.isEmpty
+                    ? 'This message has no plain-text preview.'
+                    : mail.body,
+                style: const TextStyle(height: 1.65, fontSize: 14),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -424,90 +994,91 @@ class _MailHomeState extends State<MailHome> {
     );
   }
 
-  Widget _tile(MailItem mail) => Material(
-    color: _panel,
-    borderRadius: BorderRadius.circular(20),
-    child: InkWell(
-      borderRadius: BorderRadius.circular(20),
-      onTap: () => _open(mail),
-      child: Padding(
-        padding: const EdgeInsets.all(15),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            CircleAvatar(
-              radius: 22,
-              backgroundColor: mail.unread
-                  ? const Color(0xFF633522)
-                  : const Color(0xFF30363A),
-              child: Text(
-                mail.sender.trim().isEmpty
-                    ? '?'
-                    : mail.sender.trim()[0].toUpperCase(),
-                style: const TextStyle(fontWeight: FontWeight.w800),
-              ),
-            ),
-            const SizedBox(width: 13),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+  Widget _tile(MailItem mail, {bool selected = false, VoidCallback? onTap}) =>
+      Material(
+        color: selected ? _orange.withValues(alpha: .13) : _panel,
+        borderRadius: BorderRadius.circular(20),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: onTap ?? () => _open(mail),
+          child: Padding(
+            padding: const EdgeInsets.all(15),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                CircleAvatar(
+                  radius: 22,
+                  backgroundColor: mail.unread
+                      ? const Color(0xFF633522)
+                      : const Color(0xFF30363A),
+                  child: Text(
+                    mail.sender.trim().isEmpty
+                        ? '?'
+                        : mail.sender.trim()[0].toUpperCase(),
+                    style: const TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                ),
+                const SizedBox(width: 13),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: Text(
-                          mail.sender,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontWeight: mail.unread
-                                ? FontWeight.w800
-                                : FontWeight.w600,
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              mail.sender,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontWeight: mail.unread
+                                    ? FontWeight.w800
+                                    : FontWeight.w600,
+                              ),
+                            ),
                           ),
+                          Text(
+                            mail.time,
+                            style: const TextStyle(color: _muted, fontSize: 11),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        mail.subject,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontWeight: mail.unread
+                              ? FontWeight.w800
+                              : FontWeight.w500,
                         ),
                       ),
+                      const SizedBox(height: 4),
                       Text(
-                        mail.time,
-                        style: const TextStyle(color: _muted, fontSize: 11),
+                        mail.body,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: _muted,
+                          fontSize: 12,
+                          height: 1.4,
+                        ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 5),
-                  Text(
-                    mail.subject,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontWeight: mail.unread
-                          ? FontWeight.w800
-                          : FontWeight.w500,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    mail.body,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: _muted,
-                      fontSize: 12,
-                      height: 1.4,
-                    ),
-                  ),
-                ],
-              ),
+                ),
+                const SizedBox(width: 8),
+                Icon(
+                  mail.unread ? Icons.circle : Icons.star_border_rounded,
+                  size: mail.unread ? 9 : 19,
+                  color: mail.unread ? _orange : Colors.white54,
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            Icon(
-              mail.unread ? Icons.circle : Icons.star_border_rounded,
-              size: mail.unread ? 9 : 19,
-              color: mail.unread ? _orange : Colors.white54,
-            ),
-          ],
+          ),
         ),
-      ),
-    ),
-  );
+      );
 
   Widget _welcome() => Center(
     child: SingleChildScrollView(
@@ -693,7 +1264,6 @@ class _MailHomeState extends State<MailHome> {
                 setState(() {
                   _active = _accounts.indexOf(a);
                   _folderPath = 'INBOX';
-                  _hasSynced = false;
                   _messages = [];
                 });
                 Navigator.pop(context);
@@ -771,7 +1341,6 @@ class _MailHomeState extends State<MailHome> {
                   setState(() {
                     _active = e.key;
                     _folderPath = 'INBOX';
-                    _hasSynced = false;
                     _messages = [];
                   });
                   Navigator.pop(ctx);
@@ -861,7 +1430,6 @@ class _MailHomeState extends State<MailHome> {
       _messages = [];
       _folders = const [];
       _folderPath = 'INBOX';
-      _hasSynced = false;
     });
     if (_accounts.isNotEmpty) {
       await _loadFolders();

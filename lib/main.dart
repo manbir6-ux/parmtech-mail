@@ -44,11 +44,13 @@ class _MailHomeState extends State<MailHome> {
   final _notifications = MailNotifications();
   List<MailAccount> _accounts = [];
   List<MailItem> _messages = [];
+  List<MailFolder> _folders = const [];
   int _active = 0;
   bool _loading = true;
   bool _syncing = false;
   String? _error;
   bool _hasSynced = false;
+  String _folderPath = 'INBOX';
   bool _searchOpen = false;
   final _search = TextEditingController();
 
@@ -62,7 +64,7 @@ class _MailHomeState extends State<MailHome> {
       final saved = await _vault.readAll();
       if (!mounted) return;
       setState(() { _accounts = saved; _loading = false; });
-      if (saved.isNotEmpty) await _refresh();
+      if (saved.isNotEmpty) { await _loadFolders(); await _refresh(); }
     } catch (e) {
       if (mounted) setState(() { _loading = false; _error = 'Secure account storage is unavailable. ${friendlyMailError(e)}'; });
     }
@@ -72,10 +74,10 @@ class _MailHomeState extends State<MailHome> {
     if (_accounts.isEmpty) return;
     setState(() { _syncing = true; _error = null; });
     try {
-      final items = await _service.fetchInbox(_accounts[_active]);
+      final items = await _service.fetchFolder(_accounts[_active], _folderPath);
       final previousUnread = _messages.where((m) => m.unread).length;
       final currentUnread = items.where((m) => m.unread).length;
-      if (_hasSynced && currentUnread > previousUnread) {
+      if (_folderPath.toUpperCase() == 'INBOX' && _hasSynced && currentUnread > previousUnread) {
         try { await _notifications.showNewMail(currentUnread - previousUnread); } catch (_) { /* Notification permission is optional. */ }
       }
       _hasSynced = true;
@@ -83,6 +85,22 @@ class _MailHomeState extends State<MailHome> {
     } catch (e) {
       if (mounted) setState(() => _error = friendlyMailError(e));
     } finally { if (mounted) setState(() => _syncing = false); }
+  }
+
+  Future<void> _loadFolders() async {
+    if (_accounts.isEmpty) return;
+    try {
+      final folders = await _service.listFolders(_accounts[_active]);
+      if (mounted) setState(() {
+        _folders = folders;
+        if (_folderPath != 'INBOX' && !folders.any((f) => f.path == _folderPath)) _folderPath = 'INBOX';
+      });
+    } catch (_) { /* Keep the Inbox shortcut available if LIST is unsupported. */ }
+  }
+
+  Future<void> _selectFolder(MailFolder folder) async {
+    setState(() { _folderPath = folder.path; _messages = []; _hasSynced = false; });
+    await _refresh();
   }
 
   Future<void> _addAccount() async {
@@ -97,6 +115,7 @@ class _MailHomeState extends State<MailHome> {
       await _vault.add(verified);
       if (!mounted) return;
       setState(() { _accounts = [..._accounts.where((a) => a.id != verified.id), verified]; _active = _accounts.indexWhere((a) => a.id == verified.id); _messages = []; _hasSynced = false; });
+      await _loadFolders();
       await _refresh();
     } catch (e) { if (mounted) _notice(friendlyMailError(e)); }
     finally { if (mounted) setState(() => _syncing = false); }
@@ -153,9 +172,10 @@ class _MailHomeState extends State<MailHome> {
   Widget _header(MailAccount? account) => Padding(
     padding: const EdgeInsets.fromLTRB(20, 8, 20, 10),
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Row(children: [const Expanded(child: Text('Inbox', style: TextStyle(fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: -.7))), if (account != null) _connectionPill()]),
+      Row(children: [Expanded(child: Text(_activeFolderName, style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: -.7))), if (account != null) _connectionPill()]),
       const SizedBox(height: 14),
-      const Text('Your latest messages, synced securely', style: TextStyle(color: _muted, fontSize: 12)),
+      if (_folders.isNotEmpty) SingleChildScrollView(scrollDirection: Axis.horizontal, child: Row(children: _folders.map((f) => Padding(padding: const EdgeInsets.only(right: 8), child: ChoiceChip(label: Text(_folderTitle(f)), selected: f.path == _folderPath, onSelected: (_) => _selectFolder(f)))).toList()))
+      else const Text('Your latest messages, synced securely', style: TextStyle(color: _muted, fontSize: 12)),
     ]),
   );
 
@@ -184,20 +204,29 @@ class _MailHomeState extends State<MailHome> {
     const SizedBox(height: 14), const Text('IMAP + SMTP  ·  TLS encryption  ·  Up to 10 inboxes', textAlign: TextAlign.center, style: TextStyle(color: Colors.white54, fontSize: 11)),
   ])));
 
-  Widget _emptyInbox() => Center(child: Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.inbox_outlined, size: 48, color: _muted), const SizedBox(height: 12), Text(_error == null ? 'You’re all caught up' : 'Inbox unavailable', style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)), const SizedBox(height: 6), const Text('Pull down to sync your mailbox', style: TextStyle(color: _muted))]));
+  Widget _emptyInbox() => Center(child: Column(mainAxisSize: MainAxisSize.min, children: [const Icon(Icons.inbox_outlined, size: 48, color: _muted), const SizedBox(height: 12), Text(_error == null ? 'No messages in $_activeFolderName' : 'Mailbox unavailable', style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)), const SizedBox(height: 6), const Text('Pull down to sync your mailbox', style: TextStyle(color: _muted))]));
 
   Widget _errorCard() => Padding(padding: const EdgeInsets.fromLTRB(18, 2, 18, 8), child: Material(color: const Color(0xFF42251E), borderRadius: BorderRadius.circular(14), child: ListTile(leading: const Icon(Icons.wifi_off_rounded, color: Color(0xFFFFAA8A)), title: Text(_error!, style: const TextStyle(fontSize: 12)), trailing: IconButton(onPressed: _refresh, icon: const Icon(Icons.refresh_rounded)))));
 
   Widget _drawer() => Drawer(child: SafeArea(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     Padding(padding: const EdgeInsets.fromLTRB(22, 22, 22, 18), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [const Text('PARMTECH', style: TextStyle(color: _orange, fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 2)), const SizedBox(height: 4), const Text('Your mail', style: TextStyle(fontSize: 27, fontWeight: FontWeight.w900)), Text('${_accounts.length} of 10 accounts', style: const TextStyle(color: _muted))]),
     const Divider(),
-    for (final a in _accounts) ListTile(leading: CircleAvatar(radius: 17, backgroundColor: _orange.withOpacity(.18), child: Text(a.email[0].toUpperCase(), style: const TextStyle(color: _orange))), title: Text(a.email, maxLines: 1, overflow: TextOverflow.ellipsis), trailing: IconButton(tooltip: 'Remove account', icon: const Icon(Icons.logout_rounded, size: 18), onPressed: () { final index = _accounts.indexOf(a); Navigator.pop(context); _removeAccount(index); }), onTap: () { setState(() { _active = _accounts.indexOf(a); _hasSynced = false; _messages = []; }); Navigator.pop(context); _refresh(); }),
+    for (final folder in _folders) ListTile(leading: Icon(_folderIcon(folder)), title: Text(_folderTitle(folder), maxLines: 1, overflow: TextOverflow.ellipsis), trailing: folder.unread > 0 ? Text('${folder.unread}', style: const TextStyle(color: _orange, fontWeight: FontWeight.w800)) : null, selected: folder.path == _folderPath, onTap: () { Navigator.pop(context); _selectFolder(folder); }),
+    const Divider(),
+    for (final a in _accounts) ListTile(leading: CircleAvatar(radius: 17, backgroundColor: _orange.withOpacity(.18), child: Text(a.email[0].toUpperCase(), style: const TextStyle(color: _orange))), title: Text(a.email, maxLines: 1, overflow: TextOverflow.ellipsis), trailing: IconButton(tooltip: 'Remove account', icon: const Icon(Icons.logout_rounded, size: 18), onPressed: () { final index = _accounts.indexOf(a); Navigator.pop(context); _removeAccount(index); }), onTap: () { setState(() { _active = _accounts.indexOf(a); _folderPath = 'INBOX'; _hasSynced = false; _messages = []; }); Navigator.pop(context); _loadFolders().then((_) => _refresh()); }),
     ListTile(leading: const Icon(Icons.add_circle_outline), title: const Text('Add another account'), onTap: () { Navigator.pop(context); _addAccount(); }),
     ListTile(leading: const Icon(Icons.notifications_active_outlined), title: const Text('Enable new-mail alerts'), onTap: () async { Navigator.pop(context); try { final allowed = await _notifications.requestPermission(); if (mounted) _notice(allowed ? 'New-mail alerts are enabled for inbox syncs.' : 'Notification permission was not granted.'); } catch (e) { if (mounted) _notice(friendlyMailError(e)); } }),
     const Spacer(), const Padding(padding: EdgeInsets.all(22), child: Text('Built by ParmTech', style: TextStyle(color: _muted, fontSize: 12))),
   ])));
 
-  Future<void> _accountPicker() async => showModalBottomSheet<void>(context: context, showDragHandle: true, builder: (ctx) => SafeArea(child: Padding(padding: const EdgeInsets.all(20), child: Column(mainAxisSize: MainAxisSize.min, children: [const Align(alignment: Alignment.centerLeft, child: Text('Your accounts', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900))), const SizedBox(height: 10), ..._accounts.asMap().entries.map((e) => ListTile(leading: const Icon(Icons.alternate_email_rounded, color: _orange), title: Text(e.value.email), trailing: e.key == _active ? const Icon(Icons.check_circle, color: _orange) : null, onTap: () { setState(() { _active = e.key; _hasSynced = false; _messages = []; }); Navigator.pop(ctx); _refresh(); })), ListTile(leading: const Icon(Icons.add), title: const Text('Add an account'), onTap: () { Navigator.pop(ctx); _addAccount(); })]))));
+  Future<void> _accountPicker() async => showModalBottomSheet<void>(context: context, showDragHandle: true, builder: (ctx) => SafeArea(child: Padding(padding: const EdgeInsets.all(20), child: Column(mainAxisSize: MainAxisSize.min, children: [const Align(alignment: Alignment.centerLeft, child: Text('Your accounts', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900))), const SizedBox(height: 10), ..._accounts.asMap().entries.map((e) => ListTile(leading: const Icon(Icons.alternate_email_rounded, color: _orange), title: Text(e.value.email), trailing: e.key == _active ? const Icon(Icons.check_circle, color: _orange) : null, onTap: () { setState(() { _active = e.key; _folderPath = 'INBOX'; _hasSynced = false; _messages = []; }); Navigator.pop(ctx); _loadFolders().then((_) => _refresh()); })), ListTile(leading: const Icon(Icons.add), title: const Text('Add an account'), onTap: () { Navigator.pop(ctx); _addAccount(); })]))));
+
+  String get _activeFolderName { final matching = _folders.where((f) => f.path == _folderPath); return matching.isEmpty ? 'Inbox' : _folderTitle(matching.first); }
+  String _folderTitle(MailFolder folder) {
+    final name = folder.name.split('/').last.replaceAll('"', '').trim();
+    return switch (name.toLowerCase()) { 'inbox' => 'Inbox', 'sent' || 'sent items' || 'sent mail' => 'Sent', 'drafts' => 'Drafts', 'trash' || 'deleted items' || 'deleted messages' => 'Trash', 'junk' || 'spam' => 'Spam', 'archive' => 'Archive', _ => name.isEmpty ? folder.path : name };
+  }
+  IconData _folderIcon(MailFolder folder) => switch (_folderTitle(folder).toLowerCase()) { 'inbox' => Icons.inbox_rounded, 'sent' => Icons.send_outlined, 'drafts' => Icons.drafts_outlined, 'trash' => Icons.delete_outline_rounded, 'spam' => Icons.report_gmailerrorred_outlined, 'archive' => Icons.archive_outlined, _ => Icons.folder_outlined };
 
   Future<void> _removeAccount(int index) async {
     if (index < 0 || index >= _accounts.length) return;
@@ -206,8 +235,14 @@ class _MailHomeState extends State<MailHome> {
     if (confirmed != true) return;
     await _vault.remove(account.email);
     if (!mounted) return;
-    setState(() { _accounts.removeAt(index); _active = _accounts.isEmpty ? 0 : (_active >= _accounts.length ? _accounts.length - 1 : _active); _messages = []; _hasSynced = false; });
-    if (_accounts.isNotEmpty) await _refresh();
+    final wasActive = _active == index;
+    final removedBeforeActive = index < _active;
+    setState(() {
+      _accounts.removeAt(index);
+      _active = _accounts.isEmpty ? 0 : wasActive ? (index >= _accounts.length ? _accounts.length - 1 : index) : removedBeforeActive ? _active - 1 : _active;
+      _messages = []; _folders = const []; _folderPath = 'INBOX'; _hasSynced = false;
+    });
+    if (_accounts.isNotEmpty) { await _loadFolders(); await _refresh(); }
   }
 }
 

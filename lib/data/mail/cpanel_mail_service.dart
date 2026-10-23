@@ -11,6 +11,13 @@ class MailItem {
   final bool unread;
 }
 
+class MailFolder {
+  const MailFolder({required this.name, required this.path, required this.unread});
+  final String name;
+  final String path;
+  final int unread;
+}
+
 /// Direct, device-to-provider IMAP/SMTP transport. TLS validation stays enabled.
 /// Host fallback happens only when the TCP/TLS connection itself fails; an
 /// authentication rejection is returned immediately so a bad password is not
@@ -38,12 +45,28 @@ class CpanelMailService {
     throw MailConnectionException('Could not reach a secure IMAP server. ${lastConnectionError ?? ''}');
   }
 
-  Future<List<MailItem>> fetchInbox(model.MailAccount account, {int count = 40}) async {
+  Future<List<MailFolder>> listFolders(model.MailAccount account) async {
     final client = mail.ImapClient(isLogEnabled: false);
     await client.connectToServer(account.imapHost, model.MailAccount.imapPort, isSecure: true);
     try {
       await client.login(account.email, account.password);
-      await client.selectInbox();
+      final boxes = await client.listMailboxes(recursive: true);
+      return boxes.map((box) => MailFolder(name: box.encodedName, path: box.encodedPath, unread: box.messagesUnseen ?? 0)).toList(growable: false);
+    } finally { await client.logout(); }
+  }
+
+  Future<List<MailItem>> fetchInbox(model.MailAccount account, {int count = 40}) => fetchFolder(account, 'INBOX', count: count);
+
+  Future<List<MailItem>> fetchFolder(model.MailAccount account, String folderPath, {int count = 40}) async {
+    final client = mail.ImapClient(isLogEnabled: false);
+    await client.connectToServer(account.imapHost, model.MailAccount.imapPort, isSecure: true);
+    try {
+      await client.login(account.email, account.password);
+      if (folderPath.toUpperCase() == 'INBOX') {
+        await client.selectInbox();
+      } else {
+        await client.selectMailboxByPath(folderPath);
+      }
       final result = await client.fetchRecentMessages(messageCount: count, criteria: 'BODY.PEEK[]');
       return result.messages.reversed.map((message) {
         final body = message.decodeTextPlainPart() ?? '';

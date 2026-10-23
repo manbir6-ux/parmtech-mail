@@ -34,7 +34,7 @@ class MailFolder {
 /// retried against unrelated endpoints.
 class CpanelMailService {
   Future<model.MailAccount> verify(model.MailAccount account) async {
-    Object? lastConnectionError;
+    final connectionErrors = <String>[];
     for (final candidate in model.cPanelHostCandidates(account.email)) {
       final client = mail.ImapClient(isLogEnabled: false);
       try {
@@ -44,7 +44,7 @@ class CpanelMailService {
           isSecure: true,
         );
       } catch (error) {
-        lastConnectionError = error;
+        connectionErrors.add('${candidate.host}: $error');
         continue;
       }
       try {
@@ -63,7 +63,7 @@ class CpanelMailService {
       }
     }
     throw MailConnectionException(
-      'Could not reach a secure IMAP server. ${lastConnectionError ?? ''}',
+      'Could not reach a secure IMAP server. ${connectionErrors.join('; ')}',
     );
   }
 

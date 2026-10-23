@@ -3,20 +3,25 @@ import 'dart:async';
 import 'package:enough_mail/enough_mail.dart' as mail;
 
 import '../accounts/mail_account.dart' as model;
+import 'mail_presentation.dart';
 
 class MailItem {
   const MailItem({
     required this.sender,
+    required this.senderAddress,
     required this.subject,
     required this.body,
     required this.time,
+    required this.sentAt,
     required this.unread,
   });
 
   final String sender;
+  final String senderAddress;
   final String subject;
   final String body;
   final String time;
+  final DateTime? sentAt;
   final bool unread;
 }
 
@@ -60,15 +65,15 @@ class CpanelMailService {
     final session = await _connectAndLogin(account);
     try {
       final boxes = await session.client.listMailboxes(recursive: true);
-      return boxes
-          .map(
+      return deduplicateMailFolders(
+        boxes.map(
             (box) => MailFolder(
               name: box.encodedName,
               path: box.encodedPath,
               unread: box.messagesUnseen,
             ),
-          )
-          .toList(growable: false);
+          ),
+      );
     } finally {
       await _closeImap(session.client);
     }
@@ -114,16 +119,37 @@ class CpanelMailService {
       );
       return result.messages.reversed
           .map((message) {
-            final body = message.decodeTextPlainPart() ?? '';
-            final sender = message.from?.toString() ?? account.email;
+            final plainBody = message.decodeTextPlainPart()?.trim() ?? '';
+            final body = plainBody.isNotEmpty
+                ? plainBody
+                : htmlMailToText(message.decodeTextHtmlPart() ?? '');
+            final addresses = message.from;
+            final from = addresses == null || addresses.isEmpty
+                ? null
+                : addresses.first;
+            final senderAddress = from?.email.trim() ?? '';
+            final sender = displaySenderName(
+              personalName: from?.personalName,
+              email: senderAddress,
+              fallback: account.email,
+            );
             final subject = message.decodeSubject()?.trim();
+            DateTime? sentAt;
+            try {
+              sentAt = message.decodeDate();
+            } catch (_) {
+              // Fall back to the IMAP server date for malformed Date headers.
+            }
+            sentAt ??= DateTime.tryParse(message.internalDate ?? '')?.toLocal();
             return MailItem(
               sender: sender,
+              senderAddress: senderAddress,
               subject: subject == null || subject.isEmpty
                   ? '(no subject)'
                   : subject,
               body: body.trim(),
-              time: '',
+              time: formatMailTimestamp(sentAt),
+              sentAt: sentAt,
               unread: !message.isSeen,
             );
           })
@@ -310,6 +336,46 @@ class CpanelMailService {
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&#39;');
+}
+
+/// Collapses duplicate cPanel mailbox aliases such as `Spam`, `Junk`, and
+/// `INBOX.spam` into one visible folder while retaining a usable server path.
+List<MailFolder> deduplicateMailFolders(Iterable<MailFolder> folders) {
+  final unique = <MailFolder>[];
+  final indices = <String, int>{};
+  for (final folder in folders) {
+    final rawName = folder.name.trim().isEmpty ? folder.path : folder.name;
+    final leaf = rawName
+        .split(RegExp(r'[/\\.]'))
+        .last
+        .replaceAll('"', '')
+        .trim()
+        .toLowerCase();
+    final category = switch (leaf) {
+      'inbox' => 'inbox',
+      'sent' || 'sent items' || 'sent mail' => 'sent',
+      'draft' || 'drafts' => 'drafts',
+      'trash' || 'deleted items' || 'deleted messages' => 'trash',
+      'junk' || 'spam' => 'spam',
+      'archive' => 'archive',
+      _ => '',
+    };
+    final normalizedPath = folder.path
+        .replaceAll('\\', '/')
+        .split('/')
+        .where((part) => part.trim().isNotEmpty)
+        .join('/')
+        .toLowerCase();
+    final key = category.isEmpty ? 'path:$normalizedPath' : 'system:$category';
+    final existingIndex = indices[key];
+    if (existingIndex == null) {
+      indices[key] = unique.length;
+      unique.add(folder);
+    } else if (folder.unread > unique[existingIndex].unread) {
+      unique[existingIndex] = folder;
+    }
+  }
+  return List<MailFolder>.unmodifiable(unique);
 }
 
 class _ImapSession {

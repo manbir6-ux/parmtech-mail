@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:tray_manager/tray_manager.dart' as tray;
 import 'package:window_manager/window_manager.dart';
+import 'data/background/mail_background_sync.dart';
 import 'data/accounts/mail_account.dart';
 import 'data/accounts/secure_account_vault.dart';
 import 'data/mail/cpanel_mail_service.dart';
@@ -12,6 +13,13 @@ import 'data/notifications/mail_notifications.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   if (Platform.isWindows) await windowManager.ensureInitialized();
+  if (Platform.isAndroid) {
+    try {
+      await AndroidMailBackgroundSync.initialize();
+    } catch (_) {
+      // A scheduler issue should not prevent the mailbox UI from opening.
+    }
+  }
   runApp(const ParmMailApp());
 }
 
@@ -88,7 +96,8 @@ class MailHome extends StatefulWidget {
   State<MailHome> createState() => _MailHomeState();
 }
 
-class _MailHomeState extends State<MailHome> with WindowListener {
+class _MailHomeState extends State<MailHome>
+    with WindowListener, WidgetsBindingObserver {
   final _vault = SecureAccountVault();
   final _service = CpanelMailService();
   final _notifications = MailNotifications();
@@ -112,6 +121,7 @@ class _MailHomeState extends State<MailHome> with WindowListener {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     if (Platform.isWindows) {
       windowManager.addListener(this);
       unawaited(_setupWindowsTray());
@@ -123,8 +133,45 @@ class _MailHomeState extends State<MailHome> with WindowListener {
   void dispose() {
     _search.dispose();
     _autoSyncTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     if (Platform.isWindows) windowManager.removeListener(this);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (_accounts.isEmpty) return;
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_resumeForegroundSync());
+    } else if (state == AppLifecycleState.paused) {
+      _autoSyncTimer?.cancel();
+      _autoSyncTimer = null;
+      if (Platform.isAndroid) unawaited(_scheduleAndroidBackgroundSync());
+    }
+  }
+
+  Future<void> _resumeForegroundSync() async {
+    _autoSyncTimer?.cancel();
+    if (Platform.isAndroid) {
+      try {
+        await AndroidMailBackgroundSync.cancel();
+      } catch (_) {}
+    }
+    if (!_quitting && mounted && _accounts.isNotEmpty) {
+      _autoSyncTimer = Timer.periodic(
+        const Duration(minutes: 5),
+        (_) => unawaited(_autoCheckInboxes()),
+      );
+    }
+  }
+
+  Future<void> _scheduleAndroidBackgroundSync() async {
+    if (!Platform.isAndroid || _accounts.isEmpty) return;
+    try {
+      await AndroidMailBackgroundSync.schedule();
+    } catch (_) {
+      // Android may defer background jobs when the device restricts battery use.
+    }
   }
 
   Future<void> _setupWindowsTray() async {
@@ -212,6 +259,7 @@ class _MailHomeState extends State<MailHome> with WindowListener {
     }
     try {
       final saved = await _vault.readAll();
+      _lastUnreadByEmail.addAll(await _vault.readUnreadCounts());
       if (!mounted) return;
       setState(() {
         _accounts = saved;
@@ -220,12 +268,17 @@ class _MailHomeState extends State<MailHome> with WindowListener {
       if (saved.isNotEmpty) {
         await _loadFolders();
         await _refresh();
+        unawaited(_seedUnreadCounts());
+      } else if (Platform.isAndroid) {
+        try {
+          await AndroidMailBackgroundSync.cancel();
+        } catch (_) {}
       }
-      _autoSyncTimer?.cancel();
-      _autoSyncTimer = Timer.periodic(
-        const Duration(minutes: 5),
-        (_) => unawaited(_autoCheckInboxes()),
-      );
+      if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.paused) {
+        await _scheduleAndroidBackgroundSync();
+      } else {
+        await _resumeForegroundSync();
+      }
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -251,9 +304,12 @@ class _MailHomeState extends State<MailHome> with WindowListener {
     });
     try {
       final items = await _service.fetchFolder(account, folderPath);
-      final currentUnread = items.where((m) => m.unread).length;
+      final isInbox = folderPath.toUpperCase() == 'INBOX';
+      final currentUnread = isInbox
+          ? await _service.countUnread(account)
+          : items.where((m) => m.unread).length;
       final previousUnread = _lastUnreadByEmail[account.id];
-      if (folderPath.toUpperCase() == 'INBOX' &&
+      if (isInbox &&
           previousUnread != null &&
           currentUnread > previousUnread &&
           _accounts.any((saved) => saved.id == account.id)) {
@@ -263,7 +319,7 @@ class _MailHomeState extends State<MailHome> with WindowListener {
           /* Notification permission is optional. */
         }
       }
-      if (folderPath.toUpperCase() == 'INBOX') {
+      if (isInbox) {
         _lastUnreadByEmail[account.id] = currentUnread;
       }
       if (mounted &&
@@ -272,9 +328,12 @@ class _MailHomeState extends State<MailHome> with WindowListener {
           _folderPath == folderPath) {
         setState(() {
           _messages = items;
-          _selectedMail ??= items.isEmpty ? null : items.first;
+          if (_selectedMail == null || !items.contains(_selectedMail)) {
+            _selectedMail = items.isEmpty ? null : items.first;
+          }
         });
       }
+      await _vault.writeUnreadCounts(_lastUnreadByEmail);
     } catch (e) {
       if (mounted &&
           _accounts.isNotEmpty &&
@@ -302,9 +361,7 @@ class _MailHomeState extends State<MailHome> with WindowListener {
           final isActiveInbox = account.id == activeAccountId &&
               _folderPath.toUpperCase() == 'INBOX';
           final items = isActiveInbox ? await _service.fetchInbox(account) : null;
-          final unread = items == null
-              ? await _service.countUnread(account)
-              : items.where((message) => message.unread).length;
+          final unread = await _service.countUnread(account);
           if (!_accounts.any((saved) => saved.id == account.id)) continue;
           final previous = _lastUnreadByEmail[account.id];
           _lastUnreadByEmail[account.id] = unread;
@@ -320,13 +377,16 @@ class _MailHomeState extends State<MailHome> with WindowListener {
               _folderPath.toUpperCase() == 'INBOX') {
             setState(() {
               _messages = items;
-              _selectedMail ??= items.isEmpty ? null : items.first;
+              if (_selectedMail == null || !items.contains(_selectedMail)) {
+                _selectedMail = items.isEmpty ? null : items.first;
+              }
             });
           }
         } catch (_) {
           // A temporary connection failure is retried at the next poll.
         }
       }
+      await _vault.writeUnreadCounts(_lastUnreadByEmail);
     } finally {
       if (mounted) {
         final shouldRefresh = _refreshQueued;
@@ -335,6 +395,24 @@ class _MailHomeState extends State<MailHome> with WindowListener {
         if (shouldRefresh) unawaited(_refresh());
       }
     }
+  }
+
+  Future<void> _seedUnreadCounts() async {
+    if (_accounts.isEmpty) return;
+    try {
+      final counts = await _vault.readUnreadCounts();
+      counts.addAll(_lastUnreadByEmail);
+      for (final account in List<MailAccount>.of(_accounts)) {
+        if (counts.containsKey(account.id)) continue;
+        try {
+          counts[account.id] = await _service.countUnread(account);
+        } catch (_) {
+          // The next successful sync will establish this account's baseline.
+        }
+      }
+      _lastUnreadByEmail.addAll(counts);
+      await _vault.writeUnreadCounts(counts);
+    } catch (_) {}
   }
 
   Future<void> _loadFolders() async {
@@ -362,6 +440,7 @@ class _MailHomeState extends State<MailHome> with WindowListener {
     setState(() {
       _folderPath = folder.path;
       _messages = [];
+      _selectedMail = null;
     });
     await _refresh();
   }
@@ -389,7 +468,14 @@ class _MailHomeState extends State<MailHome> with WindowListener {
         _accounts = [..._accounts.where((a) => a.id != verified.id), verified];
         _active = _accounts.indexWhere((a) => a.id == verified.id);
         _messages = [];
+        _selectedMail = null;
       });
+      if (_accounts.length == 1) {
+        try {
+          await _notifications.requestPermission();
+        } catch (_) {}
+      }
+      unawaited(_seedUnreadCounts());
       refreshAfterConnect = true;
       await _loadFolders();
     } catch (e) {
@@ -417,35 +503,13 @@ class _MailHomeState extends State<MailHome> with WindowListener {
     if (sent == true) await _refresh();
   }
 
-  Future<void> _open(MailItem message) async => showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    showDragHandle: true,
-    builder: (context) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(22, 8, 22, 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              message.subject,
-              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: 10),
-            Text(message.sender, style: const TextStyle(color: _muted)),
-            const Divider(height: 28),
-            SelectableText(
-              message.body.isEmpty
-                  ? 'This message has no plain-text preview.'
-                  : message.body,
-              style: const TextStyle(height: 1.55),
-            ),
-          ],
-        ),
+  Future<void> _open(MailItem message) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (_) => MailDetailPage(message: message),
       ),
-    ),
-  );
+    );
+  }
 
   void _notice(String text) => ScaffoldMessenger.of(context).showSnackBar(
     SnackBar(content: Text(text), behavior: SnackBarBehavior.floating),
@@ -906,11 +970,6 @@ class _MailHomeState extends State<MailHome> with WindowListener {
                   ),
                 ),
               ),
-              IconButton(
-                tooltip: 'More actions',
-                onPressed: () {},
-                icon: const Icon(Icons.more_horiz_rounded),
-              ),
             ],
           ),
           const SizedBox(height: 22),
@@ -934,6 +993,13 @@ class _MailHomeState extends State<MailHome> with WindowListener {
                       mail.sender,
                       style: const TextStyle(fontWeight: FontWeight.w700),
                     ),
+                    if (mail.senderAddress.isNotEmpty &&
+                        mail.senderAddress.toLowerCase() !=
+                            mail.sender.toLowerCase())
+                      Text(
+                        mail.senderAddress,
+                        style: const TextStyle(fontSize: 11, color: _muted),
+                      ),
                     Text(
                       mail.time.isEmpty ? 'From your mailbox' : mail.time,
                       style: const TextStyle(fontSize: 11, color: _muted),
@@ -1041,36 +1107,66 @@ class _MailHomeState extends State<MailHome> with WindowListener {
                     .contains(query),
               )
               .toList();
+    if (visible.isEmpty && query.isNotEmpty) {
+      return Center(
+        child: Text(
+          'No messages match “${_search.text.trim()}”.',
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: _muted),
+        ),
+      );
+    }
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 900),
         child: RefreshIndicator(
           onRefresh: _refresh,
           child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(16, 4, 16, 100),
+            padding: const EdgeInsets.fromLTRB(14, 2, 14, 100),
             itemCount: visible.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 8),
-            itemBuilder: (context, index) => _tile(visible[index]),
+            separatorBuilder: (_, _) => Divider(
+              height: 1,
+              indent: 70,
+              color: _darkTheme ? Colors.white10 : Colors.black12,
+            ),
+            itemBuilder: (context, index) => _tile(
+              visible[index],
+              compact: true,
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _tile(MailItem mail, {bool selected = false, VoidCallback? onTap}) =>
+  Widget _tile(
+    MailItem mail, {
+    bool selected = false,
+    bool compact = false,
+    VoidCallback? onTap,
+  }) =>
       Material(
-        color: selected ? _orange.withValues(alpha: .13) : _panel,
+        color: compact
+            ? Colors.transparent
+            : selected
+            ? _orange.withValues(alpha: .13)
+            : _panel,
         borderRadius: BorderRadius.circular(20),
         child: InkWell(
           borderRadius: BorderRadius.circular(20),
           onTap: onTap ?? () => _open(mail),
-          child: Padding(
-            padding: const EdgeInsets.all(15),
+          child: Semantics(
+            button: true,
+            label: 'Email from ${mail.sender}. ${mail.subject}. ${mail.time}',
+            child: Padding(
+            padding: compact
+                ? const EdgeInsets.symmetric(horizontal: 6, vertical: 12)
+                : const EdgeInsets.all(15),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 CircleAvatar(
-                  radius: 22,
+                  radius: compact ? 20 : 22,
                   backgroundColor: mail.unread
                       ? const Color(0xFF633522)
                       : const Color(0xFF30363A),
@@ -1097,6 +1193,7 @@ class _MailHomeState extends State<MailHome> with WindowListener {
                                 fontWeight: mail.unread
                                     ? FontWeight.w800
                                     : FontWeight.w600,
+                                fontSize: compact ? 14 : null,
                               ),
                             ),
                           ),
@@ -1115,12 +1212,13 @@ class _MailHomeState extends State<MailHome> with WindowListener {
                           fontWeight: mail.unread
                               ? FontWeight.w800
                               : FontWeight.w500,
+                          fontSize: compact ? 14 : null,
                         ),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         mail.body,
-                        maxLines: 2,
+                        maxLines: compact ? 1 : 2,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: _muted,
@@ -1132,13 +1230,14 @@ class _MailHomeState extends State<MailHome> with WindowListener {
                   ),
                 ),
                 const SizedBox(width: 8),
-                Icon(
-                  mail.unread ? Icons.circle : Icons.star_border_rounded,
-                  size: mail.unread ? 9 : 19,
-                  color: mail.unread ? _orange : Colors.white54,
-                ),
+                if (mail.unread)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Icon(Icons.circle, size: 9, color: _orange),
+                  ),
               ],
             ),
+          ),
           ),
         ),
       );
@@ -1328,6 +1427,7 @@ class _MailHomeState extends State<MailHome> with WindowListener {
                   _active = _accounts.indexOf(a);
                   _folderPath = 'INBOX';
                   _messages = [];
+                  _selectedMail = null;
                 });
                 Navigator.pop(context);
                 _loadFolders().then((_) => _refresh());
@@ -1351,7 +1451,9 @@ class _MailHomeState extends State<MailHome> with WindowListener {
                 if (mounted) {
                   _notice(
                     allowed
-                        ? 'New-mail alerts are enabled for inbox syncs.'
+                        ? Platform.isAndroid
+                              ? 'Alerts are on. Android checks for new mail in the background when the system allows.'
+                              : 'New-mail alerts are enabled for inbox syncs.'
                         : 'Notification permission was not granted.',
                   );
                 }
@@ -1405,6 +1507,7 @@ class _MailHomeState extends State<MailHome> with WindowListener {
                     _active = e.key;
                     _folderPath = 'INBOX';
                     _messages = [];
+                    _selectedMail = null;
                   });
                   Navigator.pop(ctx);
                   _loadFolders().then((_) => _refresh());
@@ -1431,7 +1534,11 @@ class _MailHomeState extends State<MailHome> with WindowListener {
   }
 
   String _folderTitle(MailFolder folder) {
-    final name = folder.name.split('/').last.replaceAll('"', '').trim();
+    final name = folder.name
+        .split(RegExp(r'[/\\.]'))
+        .last
+        .replaceAll('"', '')
+        .trim();
     return switch (name.toLowerCase()) {
       'inbox' => 'Inbox',
       'sent' || 'sent items' || 'sent mail' => 'Sent',
@@ -1494,6 +1601,7 @@ class _MailHomeState extends State<MailHome> with WindowListener {
       _messages = [];
       _folders = const [];
       _folderPath = 'INBOX';
+      _selectedMail = null;
     });
     if (_accounts.isNotEmpty) {
       await _loadFolders();
@@ -1506,6 +1614,83 @@ class AddAccountPage extends StatefulWidget {
   const AddAccountPage({super.key});
   @override
   State<AddAccountPage> createState() => _AddAccountPageState();
+}
+
+class MailDetailPage extends StatelessWidget {
+  const MailDetailPage({super.key, required this.message});
+
+  final MailItem message;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Message')),
+    body: SafeArea(
+      child: ListView(
+        padding: const EdgeInsets.fromLTRB(22, 8, 22, 32),
+        children: [
+          Text(
+            message.subject,
+            style: const TextStyle(
+              fontSize: 25,
+              height: 1.15,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -.4,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CircleAvatar(
+                backgroundColor: _orange.withValues(alpha: .2),
+                foregroundColor: _orange,
+                child: Text(
+                  message.sender.trim().isEmpty
+                      ? '?'
+                      : message.sender.trim()[0].toUpperCase(),
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      message.sender,
+                      style: const TextStyle(fontWeight: FontWeight.w800),
+                    ),
+                    if (message.senderAddress.isNotEmpty &&
+                        message.senderAddress.toLowerCase() !=
+                            message.sender.toLowerCase())
+                      Text(
+                        message.senderAddress,
+                        style: const TextStyle(color: _muted, fontSize: 12),
+                      ),
+                    if (message.time.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          message.time,
+                          style: const TextStyle(color: _muted, fontSize: 12),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const Divider(height: 32),
+          SelectableText(
+            message.body.isEmpty
+                ? 'This message has no readable text content.'
+                : message.body,
+            style: const TextStyle(height: 1.6, fontSize: 15),
+          ),
+        ],
+      ),
+    ),
+  );
 }
 
 class _AddAccountPageState extends State<AddAccountPage> {

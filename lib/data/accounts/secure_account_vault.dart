@@ -15,6 +15,7 @@ class SecureAccountVault {
 
   static const int maxAccounts = 10;
   static const String _storageKey = 'parm_mail.accounts.v1';
+  static const String _unreadCountsKey = 'parm_mail.unread_counts.v1';
   final FlutterSecureStorage _storage;
 
   Future<List<MailAccount>> readAll() async {
@@ -44,7 +45,30 @@ class SecureAccountVault {
     final id = email.trim().toLowerCase();
     final accounts = (await readAll()).where((item) => item.id != id).toList();
     await _write(accounts);
+    final unreadCounts = await readUnreadCounts();
+    unreadCounts.remove(id);
+    await writeUnreadCounts(unreadCounts);
   }
+
+  Future<Map<String, int>> readUnreadCounts() async {
+    final raw = await _storage.read(key: _unreadCountsKey);
+    if (raw == null || raw.isEmpty) return <String, int>{};
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map<String, dynamic>) return <String, int>{};
+      return decoded.map((key, value) {
+        final count = value is int ? value : int.tryParse('$value') ?? 0;
+        return MapEntry(key, count < 0 ? 0 : count);
+      });
+    } on FormatException {
+      return <String, int>{};
+    }
+  }
+
+  Future<void> writeUnreadCounts(Map<String, int> counts) => _storage.write(
+        key: _unreadCountsKey,
+        value: jsonEncode(counts),
+      );
 
   Future<void> clear() => _storage.delete(key: _storageKey);
 

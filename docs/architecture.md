@@ -33,7 +33,7 @@ Generated macOS builds need `com.apple.security.network.client` in both DebugPro
 
 On macOS, the vault uses the standard Keychain API without the data-protection keychain option. This avoids requiring Keychain Sharing and a provisioning profile for a distributable DMG.
 
-The app checks all saved accounts every five minutes while the app process is running. It uses IMAP SEARCH for unread counts on inactive accounts and refreshes message bodies only for the active inbox. A local notification can be raised when a later check detects more unread messages. Mobile operating systems may suspend timers in the background, so this is not guaranteed background delivery; shared-hosting IMAP has no generic push guarantee and this app does not run a server-side watcher.
+The app checks all saved accounts every five minutes while it is active. On Android, WorkManager schedules a network-constrained unread-count check while the app is backgrounded, at Android's minimum 15-minute interval; the OS and device battery settings may defer it. The worker uses the same OS-secured account vault and raises a local notification when the unread count increases. iOS and desktop do not yet have equivalent background scheduling in this release. Shared-hosting IMAP has no generic push guarantee and this app does not run a server-side watcher.
 
 ## Suggested next modules
 

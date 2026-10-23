@@ -8,7 +8,7 @@ void main() => runApp(const ParmMailApp());
 
 const _ink = Color(0xFF0D1012);
 const _panel = Color(0xFF171B1E);
-const _orange = Color(0xFFFF6B3D);
+const _orange = Color(0xFF17B9F2);
 const _muted = Color(0xFF99A2A6);
 
 class ParmMailApp extends StatelessWidget {
@@ -197,7 +197,7 @@ class _MailHomeState extends State<MailHome> {
   ]))));
 
   Widget _welcome() => Center(child: SingleChildScrollView(padding: const EdgeInsets.all(28), child: Column(mainAxisSize: MainAxisSize.min, children: [
-    Container(width: 106, height: 106, decoration: BoxDecoration(borderRadius: BorderRadius.circular(34), gradient: const LinearGradient(colors: [_orange, Color(0xFFFFA15E)]), boxShadow: [BoxShadow(color: _orange.withOpacity(.22), blurRadius: 36)]), child: const Icon(Icons.mark_email_read_rounded, color: Colors.black, size: 48)),
+    Container(width: 124, height: 124, padding: const EdgeInsets.all(7), decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(30), boxShadow: [BoxShadow(color: _orange.withOpacity(.16), blurRadius: 34, spreadRadius: 2)]), child: ClipRRect(borderRadius: BorderRadius.circular(24), child: Image.asset('assets/parmtech-mark.png', fit: BoxFit.cover)),
     const SizedBox(height: 28), const Text('Mail, beautifully\nconnected.', textAlign: TextAlign.center, style: TextStyle(fontSize: 32, fontWeight: FontWeight.w900, height: 1.05, letterSpacing: -1.1)),
     const SizedBox(height: 12), const Text('Bring your domain inboxes together. Your mailbox password stays protected on this device.', textAlign: TextAlign.center, style: TextStyle(color: _muted, height: 1.5)),
     const SizedBox(height: 24), FilledButton.icon(onPressed: _addAccount, icon: const Icon(Icons.add_rounded), label: const Padding(padding: EdgeInsets.symmetric(vertical: 14), child: Text('Connect your first account'))),

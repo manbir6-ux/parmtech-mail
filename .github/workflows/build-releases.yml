@@ -17,6 +17,24 @@ jobs:
       - uses: subosito/flutter-action@v2
         with: { channel: stable, cache: true }
       - run: flutter create . --platforms=android
+      - name: Enable Android core library desugaring
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("android/app/build.gradle.kts")
+          gradle = path.read_text()
+          marker = "    compileOptions {"
+          if marker not in gradle:
+              raise SystemExit("Could not find Android compileOptions block")
+          gradle = gradle.replace(
+              marker,
+              marker + "\n        isCoreLibraryDesugaringEnabled = true",
+              1,
+          )
+          gradle += '\n\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'
+          path.write_text(gradle)
+          PY
       - run: flutter pub get
       - run: flutter build apk --release
       - run: flutter build appbundle --release
@@ -52,7 +70,7 @@ jobs:
       - run: flutter create . --platforms=windows
       - run: flutter pub get
       - run: flutter build windows --release
-      - run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath ParmTech-Mail-Windows.zip
+      - run: Compress-Archive -Path build\\windows\\x64\\runner\\Release\\* -DestinationPath ParmTech-Mail-Windows.zip
       - uses: actions/upload-artifact@v4
         with:
           name: parmtech-mail-windows

@@ -40,17 +40,17 @@ class MailServerCandidate {
   final String host;
 }
 
-/// Uses only the two server names verified for this Namecheap cPanel account:
-/// the SSL/TLS hostname shown in cPanel and the hosting server hostname from
-/// the cPanel URL. Do not synthesize `mail.<domain>` for parmtech.au.
+/// Uses only server names shown in this account's cPanel evidence.
+/// Prefer the hosting server hostname from the cPanel URL because the domain
+/// hostname currently has no DNS address; use the domain name only as fallback.
 List<MailServerCandidate> cPanelHostCandidates(String email) {
   final domain = email.trim().split('@').last.toLowerCase();
   if (domain.isEmpty || !domain.contains('.')) return const [];
 
   if (domain == 'parmtech.au') {
     return const [
-      MailServerCandidate('parmtech.au'),
       MailServerCandidate('premium214.web-hosting.com'),
+      MailServerCandidate('parmtech.au'),
     ];
   }
   return [MailServerCandidate(domain)];

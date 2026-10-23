@@ -17,9 +17,11 @@ jobs:
       - uses: subosito/flutter-action@v2
         with: { channel: stable, cache: true }
       - run: flutter create . --platforms=android
+      - name: Set Android app label
+        run: sed -i 's/android:label="parm_mail"/android:label="Parmtech Mail"/' android/app/src/main/AndroidManifest.xml
       - name: Enable Android core library desugaring
         run: |
-          python3 - <<'PY'
+          python3 - <<'PYCODE'
           from pathlib import Path
 
           path = Path("android/app/build.gradle.kts")
@@ -27,14 +29,10 @@ jobs:
           marker = "    compileOptions {"
           if marker not in gradle:
               raise SystemExit("Could not find Android compileOptions block")
-          gradle = gradle.replace(
-              marker,
-              marker + "\n        isCoreLibraryDesugaringEnabled = true",
-              1,
-          )
+          gradle = gradle.replace(marker, marker + "\n        isCoreLibraryDesugaringEnabled = true", 1)
           gradle += '\n\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'
           path.write_text(gradle)
-          PY
+          PYCODE
       - run: flutter pub get
       - run: flutter build apk --release
       - run: flutter build appbundle --release
@@ -70,11 +68,21 @@ jobs:
       - run: flutter create . --platforms=windows
       - run: flutter pub get
       - run: flutter build windows --release
-      - run: Compress-Archive -Path build\\windows\\x64\\runner\\Release\\* -DestinationPath ParmTech-Mail-Windows.zip
+      - run: Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath ParmTech-Mail-Windows.zip
+      - name: Build Windows installer
+        shell: pwsh
+        run: |
+          choco install innosetup --yes --no-progress
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          $compiler = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          & $compiler /DSourceDir="build\windows\x64\runner\Release" /DOutputDir="artifacts" windows\installer\ParmtechMail.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
           name: parmtech-mail-windows
-          path: ParmTech-Mail-Windows.zip
+          path: |
+            ParmTech-Mail-Windows.zip
+            artifacts/Parmtech-Mail-Setup.exe
 
   linux:
     if: github.event_name != 'push' || startsWith(github.ref, 'refs/tags/')

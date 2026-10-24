@@ -1401,8 +1401,8 @@ class _MailHomeState extends State<MailHome>
               child: Text(
                 _activeFolderName,
                 style: const TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w900,
+                  fontSize: 25,
+                   fontWeight: FontWeight.w800,
                   letterSpacing: -.7,
                 ),
               ),
@@ -1554,8 +1554,8 @@ class _MailHomeState extends State<MailHome>
                 CircleAvatar(
                   radius: compact ? 20 : 22,
                   backgroundColor: mail.unread
-                      ? const Color(0xFF633522)
-                      : const Color(0xFF30363A),
+                      ? _orange.withValues(alpha: .17)
+                      : _muted.withValues(alpha: .15),
                   child: Text(
                     mail.sender.trim().isEmpty
                         ? '?'
@@ -1584,8 +1584,8 @@ class _MailHomeState extends State<MailHome>
                             ),
                           ),
                           Text(
-                            mail.time,
-                            style: const TextStyle(color: _muted, fontSize: 11),
+                             mail.sentAt == null ? mail.time : formatInboxTimestamp(mail.sentAt!),
+                             style: const TextStyle(color: _muted, fontSize: 11),
                           ),
                         ],
                       ),
@@ -1602,6 +1602,17 @@ class _MailHomeState extends State<MailHome>
                         ),
                       ),
                       const SizedBox(height: 4),
+                      if (threadCount > 1)
+
+                        Padding(
+
+                          padding: const EdgeInsets.only(top: 4),
+
+                          child: Text('$threadCount messages',
+
+                            style: const TextStyle(color: _orange, fontSize: 11, fontWeight: FontWeight.w700)),
+
+                        ),
                       Text(
                         mail.body,
                         maxLines: compact ? 1 : 2,

@@ -1532,11 +1532,7 @@ class _MailHomeState extends State<MailHome>
           child: ListView.separated(
             padding: const EdgeInsets.fromLTRB(14, 2, 14, 100),
             itemCount: conversations.length,
-            separatorBuilder: (_, _) => Divider(
-              height: 1,
-              indent: 70,
-              color: _darkTheme ? Colors.white10 : Colors.black12,
-            ),
+            separatorBuilder: (_, _) => const SizedBox(height: 7),
             itemBuilder: (context, index) => _tile(
               conversations[index].latest,
               compact: true,
@@ -1559,53 +1555,85 @@ class _MailHomeState extends State<MailHome>
     int threadCount = 1,
     VoidCallback? onTap,
   }) {
+    final colors = Theme.of(context).colorScheme;
     final selectedForAction = _selectedMessageIds.contains(mail.identity);
+    final highlighted = selected || selectedForAction;
+    const avatarPalette = <Color>[
+      Color(0xFF5365D9),
+      Color(0xFF07889D),
+      Color(0xFF9562C2),
+      Color(0xFFC46D52),
+    ];
+    final senderHash = mail.sender.codeUnits.fold<int>(0, (a, b) => a + b);
+    final avatarColor = avatarPalette[senderHash % avatarPalette.length];
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(17),
+      side: BorderSide(
+        color: highlighted
+            ? _orange.withValues(alpha: .38)
+            : colors.outlineVariant.withValues(alpha: _darkTheme ? .3 : .5),
+      ),
+    );
     final tile = Material(
-        color: compact
-            ? Colors.transparent
-            : selected || selectedForAction
-            ? _orange.withValues(alpha: .13)
-            : _panel,
-        borderRadius: BorderRadius.circular(20),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(20),
-          onTap: () {
-            if (_selectedMessageIds.isNotEmpty) {
-              setState(() {
-                if (!_selectedMessageIds.add(mail.identity)) {
-                  _selectedMessageIds.remove(mail.identity);
-                }
-              });
-            } else if (onTap != null) {
-              onTap();
-            } else {
-              _open(mail);
-            }
-          },
-          onLongPress: () => _showMailActions(mail),
-          child: Semantics(
-            button: true,
-            label: 'Email from ${mail.sender}. ${mail.subject}. ${mail.time}',
-            child: Padding(
-            padding: compact
-                ? const EdgeInsets.symmetric(horizontal: 8, vertical: 10)
-                : const EdgeInsets.all(15),
+      color: highlighted
+          ? _orange.withValues(alpha: _darkTheme ? .21 : .095)
+          : mail.unread
+              ? (_darkTheme
+                  ? const Color(0xFF202D45)
+                  : Colors.white)
+              : _panel,
+      shape: shape,
+      elevation: 0,
+      child: InkWell(
+        customBorder: shape,
+        onTap: () {
+          if (_selectedMessageIds.isNotEmpty) {
+            setState(() {
+              if (!_selectedMessageIds.add(mail.identity)) {
+                _selectedMessageIds.remove(mail.identity);
+              }
+            });
+          } else if (onTap != null) {
+            onTap();
+          } else {
+            _open(mail);
+          }
+        },
+        onLongPress: () => _showMailActions(mail),
+        child: Semantics(
+          button: true,
+          label: 'Email from ${mail.sender}. ${mail.subject}. ${mail.time}',
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: compact ? 13 : 15,
+              vertical: compact ? 13 : 15,
+            ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                CircleAvatar(
-                  radius: compact ? 20 : 22,
-                  backgroundColor: mail.unread
-                      ? _orange.withValues(alpha: .17)
-                      : _muted.withValues(alpha: .15),
+                Container(
+                  width: compact ? 43 : 46,
+                  height: compact ? 43 : 46,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: avatarColor.withValues(alpha: _darkTheme ? .23 : .13),
+                    borderRadius: BorderRadius.circular(15),
+                  ),
                   child: Text(
                     mail.sender.trim().isEmpty
                         ? '?'
                         : mail.sender.trim()[0].toUpperCase(),
-                    style: const TextStyle(fontWeight: FontWeight.w800, color: _orange),
+                    style: TextStyle(
+                      color: _darkTheme
+                          ? Color.lerp(avatarColor, Colors.white, .32)
+                          : avatarColor,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 20,
+                      letterSpacing: -.5,
+                    ),
                   ),
                 ),
-                const SizedBox(width: 13),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1619,71 +1647,107 @@ class _MailHomeState extends State<MailHome>
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 fontWeight: mail.unread
-                                    ? FontWeight.w800
-                                    : FontWeight.w600,
-                                fontSize: compact ? 13 : null,
+                                    ? FontWeight.w900
+                                    : FontWeight.w700,
+                                fontSize: compact ? 14 : 15,
+                                height: 1.15,
+                                letterSpacing: -.25,
                               ),
                             ),
                           ),
+                          const SizedBox(width: 7),
                           Text(
-                             mail.sentAt == null ? mail.time : formatInboxTimestamp(mail.sentAt!),
-                             style: const TextStyle(color: _muted, fontSize: 11),
+                            mail.sentAt == null
+                                ? mail.time
+                                : formatInboxTimestamp(mail.sentAt!),
+                            maxLines: 1,
+                            style: TextStyle(
+                              color: colors.onSurfaceVariant,
+                              fontSize: 10,
+                              fontWeight: mail.unread
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                            ),
                           ),
+                          if (mail.unread) ...[
+                            const SizedBox(width: 6),
+                            const Icon(Icons.circle, size: 7, color: _orange),
+                          ],
                         ],
                       ),
-                      const SizedBox(height: 5),
+                      const SizedBox(height: 6),
                       Text(
-                        mail.subject,
+                        mail.subject.isEmpty ? '(No subject)' : mail.subject,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontWeight: mail.unread
                               ? FontWeight.w800
-                              : FontWeight.w500,
-                          fontSize: compact ? 14 : null,
+                              : FontWeight.w600,
+                          fontSize: compact ? 13.5 : 14,
+                          height: 1.2,
+                          letterSpacing: -.15,
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      if (threadCount > 1)
-
-                        Padding(
-
-                          padding: const EdgeInsets.only(top: 4),
-
-                          child: Text('$threadCount messages',
-
-                            style: const TextStyle(color: _orange, fontSize: 11, fontWeight: FontWeight.w700)),
-
-                        ),
-                      Text(
-                        mail.body,
-                        maxLines: compact ? 1 : 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: _muted,
-                          fontSize: 12,
-                          height: 1.4,
-                        ),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          if (threadCount > 1) ...[
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 7,
+                                vertical: 3,
+                              ),
+                              decoration: BoxDecoration(
+                                color: _orange.withValues(alpha: .12),
+                                borderRadius: BorderRadius.circular(7),
+                              ),
+                              child: Text(
+                                '$threadCount replies',
+                                style: const TextStyle(
+                                  color: _orange,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 7),
+                          ],
+                          Expanded(
+                            child: Text(
+                              mail.body.replaceAll(RegExp(r'\s+'), ' ').trim(),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: colors.onSurfaceVariant,
+                                height: 1.2,
+                              ),
+                            ),
+                          ),
+                          if (mail.starred)
+                            const Padding(
+                              padding: EdgeInsets.only(left: 7),
+                              child: Icon(Icons.star_rounded,
+                                  size: 17, color: Color(0xFFF0B74D)),
+                            ),
+                          if (selectedForAction)
+                            const Padding(
+                              padding: EdgeInsets.only(left: 7),
+                              child: Icon(Icons.check_circle_rounded,
+                                  size: 18, color: _orange),
+                            ),
+                        ],
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(width: 8),
-                if (selectedForAction)
-                  const Icon(Icons.check_circle_rounded, color: _orange)
-                else if (mail.starred)
-                  const Icon(Icons.star_rounded, color: Color(0xFFFFC857), size: 18)
-                else if (mail.unread)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 6),
-                    child: Icon(Icons.circle, size: 9, color: _orange),
-                  ),
               ],
             ),
           ),
-          ),
         ),
-      );
+      ),
+    );
     if (!compact || _accounts.isEmpty) return tile;
     return Dismissible(
       key: ValueKey(mail.identity),
@@ -1691,17 +1755,26 @@ class _MailHomeState extends State<MailHome>
       background: Container(
         alignment: Alignment.centerLeft,
         padding: const EdgeInsets.symmetric(horizontal: 24),
-        color: const Color(0xFF258773),
+        decoration: BoxDecoration(
+          color: const Color(0xFF168F79),
+          borderRadius: BorderRadius.circular(17),
+        ),
         child: const Icon(Icons.mark_email_read_rounded, color: Colors.white),
       ),
       secondaryBackground: Container(
         alignment: Alignment.centerRight,
         padding: const EdgeInsets.symmetric(horizontal: 24),
-        color: const Color(0xFFE64E55),
+        decoration: BoxDecoration(
+          color: const Color(0xFFE35461),
+          borderRadius: BorderRadius.circular(17),
+        ),
         child: const Icon(Icons.delete_outline_rounded, color: Colors.white),
       ),
       confirmDismiss: (direction) async {
-        await _actOnMail(mail, direction == DismissDirection.startToEnd ? 'read' : 'delete');
+        await _actOnMail(
+          mail,
+          direction == DismissDirection.startToEnd ? 'read' : 'delete',
+        );
         return false;
       },
       child: tile,

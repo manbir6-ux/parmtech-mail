@@ -652,7 +652,9 @@ class _MailHomeState extends State<MailHome>
 
   Future<void> _saveCurrentFolderSnapshot(MailAccount account, String folderPath) async {
     if (!mounted || _accounts.isEmpty ||
-        _accounts[_active].id != account.id || _folderPath != folderPath) return;
+        _accounts[_active].id != account.id || _folderPath != folderPath) {
+      return;
+    }
     final snapshot = List<MailItem>.of(_messages);
     await _vault.writeMailCache(account.id, folderPath,
         jsonEncode(snapshot.map((mail) => mail.toJson()).toList()));

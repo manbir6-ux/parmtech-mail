@@ -2037,11 +2037,15 @@ class MailDetailPage extends StatelessWidget {
 class _AddAccountPageState extends State<AddAccountPage> {
   final _email = TextEditingController();
   final _password = TextEditingController();
+  final _imapHost = TextEditingController();
+  final _smtpHost = TextEditingController();
   bool _hide = true;
   @override
   void dispose() {
     _email.dispose();
     _password.dispose();
+    _imapHost.dispose();
+    _smtpHost.dispose();
     super.dispose();
   }
 
@@ -2100,6 +2104,36 @@ class _AddAccountPageState extends State<AddAccountPage> {
                 ),
               ),
             ),
+            const SizedBox(height: 10),
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              title: const Text('Advanced server settings'),
+              subtitle: const Text('Use separate hostnames from your email provider'),
+              children: [
+                TextField(
+                  controller: _imapHost,
+                  textInputAction: TextInputAction.next,
+                  autocorrect: false,
+                  decoration: const InputDecoration(
+                    labelText: 'IMAP hostname (optional)',
+                    hintText: 'mail.example.com',
+                    helperText: 'Secure IMAP port 993',
+                    prefixIcon: Icon(Icons.dns_outlined),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _smtpHost,
+                  autocorrect: false,
+                  decoration: const InputDecoration(
+                    labelText: 'SMTP hostname (optional)',
+                    hintText: 'mail.example.com',
+                    helperText: 'Secure SMTP port 465',
+                    prefixIcon: Icon(Icons.outgoing_mail),
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 22),
             FilledButton.icon(
               onPressed: _submit,
@@ -2130,13 +2164,27 @@ class _AddAccountPageState extends State<AddAccountPage> {
       );
       return;
     }
+    final defaultHost = cPanelHostCandidates(email).first.host;
+    final imapHost = _imapHost.text.trim().isEmpty
+        ? defaultHost
+        : _imapHost.text.trim().toLowerCase();
+    final smtpHost = _smtpHost.text.trim().isEmpty
+        ? imapHost
+        : _smtpHost.text.trim().toLowerCase();
+    if (!isValidMailServerHost(imapHost) ||
+        !isValidMailServerHost(smtpHost)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Enter valid DNS hostnames without https:// or port numbers.'),
+      ));
+      return;
+    }
     Navigator.pop(
       context,
       MailAccount(
         email: email,
         password: _password.text,
-        imapHost: cPanelHostCandidates(email).first.host,
-        smtpHost: cPanelHostCandidates(email).first.host,
+        imapHost: imapHost,
+        smtpHost: smtpHost,
       ),
     );
   }

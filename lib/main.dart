@@ -811,7 +811,14 @@ class _MailHomeState extends State<MailHome>
     if (confirmed != true || !mounted || _accounts.isEmpty) return;
     try {
       await _service.deleteMessages(_accounts[_active], selected);
-      if (mounted) setState(() { _messages.removeWhere((m) => _selectedMessageIds.contains(m.identity)); _selectedMessageIds.clear(); });
+      if (mounted) {
+        setState(() {
+          _messages.removeWhere((m) => _selectedMessageIds.contains(m.identity));
+          _selectedMessageIds.clear();
+          _selectedMail = _messages.firstOrNull;
+        });
+        await _saveCurrentFolderSnapshot(_accounts[_active], _folderPath);
+      }
     } catch (e) { if (mounted) _notice(friendlyMailError(e)); }
   }
 

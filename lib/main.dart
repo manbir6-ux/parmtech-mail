@@ -2071,6 +2071,16 @@ class _MailHomeState extends State<MailHome>
     if (_accounts.isNotEmpty) {
       await _loadFolders();
       await _refresh();
+    } else if (Platform.isAndroid) {
+      await AndroidMailBackgroundSync.cancel();
+      await LiveMailService.stop();
+      await _vault.writeLiveSyncEnabled(false);
+      if (mounted) {
+        setState(() {
+          _liveSyncEnabled = false;
+          _liveSyncRunning = false;
+        });
+      }
     }
   }
 }

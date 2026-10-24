@@ -1,9 +1,18 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:enough_mail/enough_mail.dart' as mail;
 
 import '../accounts/mail_account.dart' as model;
 import 'mail_presentation.dart';
+
+/// A small file selected for SMTP submission. Never saved to mail caches.
+class OutgoingMailAttachment {
+  const OutgoingMailAttachment({required this.name, required this.bytes});
+
+  final String name;
+  final Uint8List bytes;
+}
 
 class MailItem {
   const MailItem({
@@ -332,7 +341,14 @@ class CpanelMailService {
     required String to,
     required String subject,
     required String body,
+    List<OutgoingMailAttachment> attachments = const [],
   }) async {
+    if (attachments.fold<int>(0, (size, file) => size + file.bytes.length) >
+        20 * 1024 * 1024) {
+      throw const MailConnectionException(
+        'Attachments exceed the 20 MB total size limit.',
+      );
+    }
     if (!model.isValidMailAddress(to)) {
       throw const MailConnectionException('Enter a valid recipient email address.');
     }
@@ -386,19 +402,28 @@ class CpanelMailService {
           );
         }
 
-        final message =
-            mail.MessageBuilder.prepareMultipartAlternativeMessage(
+        final html = '<p>${_escapeHtml(body).replaceAll('\n', '<br>')}</p>';
+        final builder = attachments.isEmpty
+            ? mail.MessageBuilder.prepareMultipartAlternativeMessage(
                 plainText: body,
-                htmlText:
-                    '<p>${_escapeHtml(body).replaceAll('\n', '<br>')}</p>',
+                htmlText: html,
               )
-              ..from = [mail.MailAddress('', account.email.trim())]
-              ..to = [mail.MailAddress('', to.trim())]
-              ..subject = subject;
-
+            : (mail.MessageBuilder.prepareMultipartMixedMessage()
+              ..addMultipartAlternative(plainText: body, htmlText: html));
+        builder.from = [mail.MailAddress('', account.email.trim())];
+        builder.to = [mail.MailAddress('', to.trim())];
+        builder.subject = subject;
+        for (final file in attachments) {
+          final name = file.name.replaceAll(RegExp(r'[\r\n\\/]'), '_');
+          builder.addBinary(
+            file.bytes,
+            mail.MediaType.guessFromFileName(name),
+            filename: name,
+          );
+        }
         final response = await _withSmtpTimeout(
           client,
-          () => client.sendMessage(message.buildMimeMessage()),
+          () => client.sendMessage(builder.buildMimeMessage()),
         );
         if (!response.isOkStatus) {
           throw const MailConnectionException(

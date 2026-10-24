@@ -418,17 +418,23 @@ class _MailHomeState extends State<MailHome>
           _liveSyncEnabled = false;
           _liveSyncRunning = false;
         });
-        if (mounted) _notice('2-minute live sync stopped. Android periodic checks remain enabled.');
+        if (mounted) {
+        _notice('2-minute live sync stopped. Android periodic checks remain enabled.');
+      }
         return;
       }
       final allowed = await _notifications.requestPermission();
       if (!allowed) {
-        if (mounted) _notice('Allow notifications in Android Settings to receive new mail alerts.');
+        if (mounted) {
+        _notice('Allow notifications in Android Settings to receive new mail alerts.');
+      }
         return;
       }
       final started = await LiveMailService.start();
       if (!started) {
-        if (mounted) _notice('Could not start live sync. Android may be blocking background services.');
+        if (mounted) {
+        _notice('Could not start live sync. Android may be blocking background services.');
+      }
         return;
       }
       await _vault.writeLiveSyncEnabled(true);
@@ -436,9 +442,13 @@ class _MailHomeState extends State<MailHome>
         _liveSyncEnabled = true;
         _liveSyncRunning = true;
       });
-      if (mounted) _notice('Live checks enabled, about every 2 minutes while Android permits.');
+      if (mounted) {
+        _notice('Live checks enabled, about every 2 minutes while Android permits.');
+      }
     } catch (error) {
-      if (mounted) _notice('Live sync unavailable: $error');
+      if (mounted) {
+        _notice('Live sync unavailable: $error');
+      }
     }
   }
 

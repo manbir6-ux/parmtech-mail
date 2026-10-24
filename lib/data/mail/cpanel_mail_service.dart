@@ -202,7 +202,7 @@ class CpanelMailService {
             } catch (_) {
               // Fall back to the IMAP server date for malformed Date headers.
             }
-            sentAt ??= DateTime.tryParse(message.internalDate ?? '')?.toLocal();
+            sentAt ??= parseImapInternalDate(message.internalDate);
             return MailItem(
               sender: sender,
               senderAddress: senderAddress,

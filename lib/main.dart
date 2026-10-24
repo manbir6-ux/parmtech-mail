@@ -1407,7 +1407,7 @@ class _MailHomeState extends State<MailHome>
             if (account != null) _connectionPill(),
           ],
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 9),
         if (_folders.isNotEmpty)
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -1438,17 +1438,17 @@ class _MailHomeState extends State<MailHome>
   Widget _connectionPill() => Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
     decoration: BoxDecoration(
-      color: const Color(0xFF17372C),
+      color: _orange.withValues(alpha: .12),
       borderRadius: BorderRadius.circular(30),
     ),
     child: const Row(
       children: [
-        Icon(Icons.lock_rounded, size: 13, color: Color(0xFF72D6A6)),
+        Icon(Icons.lock_rounded, size: 13, color: _orange),
         SizedBox(width: 5),
         Text(
           'SECURE',
           style: TextStyle(
-            color: Color(0xFF8AE0B4),
+            color: _orange,
             fontSize: 10,
             fontWeight: FontWeight.w800,
             letterSpacing: .7,
@@ -1536,7 +1536,7 @@ class _MailHomeState extends State<MailHome>
             label: 'Email from ${mail.sender}. ${mail.subject}. ${mail.time}',
             child: Padding(
             padding: compact
-                ? const EdgeInsets.symmetric(horizontal: 6, vertical: 12)
+                ? const EdgeInsets.symmetric(horizontal: 8, vertical: 10)
                 : const EdgeInsets.all(15),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1550,7 +1550,7 @@ class _MailHomeState extends State<MailHome>
                     mail.sender.trim().isEmpty
                         ? '?'
                         : mail.sender.trim()[0].toUpperCase(),
-                    style: const TextStyle(fontWeight: FontWeight.w800),
+                    style: const TextStyle(fontWeight: FontWeight.w800, color: _orange),
                   ),
                 ),
                 const SizedBox(width: 13),
@@ -1569,7 +1569,7 @@ class _MailHomeState extends State<MailHome>
                                 fontWeight: mail.unread
                                     ? FontWeight.w800
                                     : FontWeight.w600,
-                                fontSize: compact ? 14 : null,
+                                fontSize: compact ? 13 : null,
                               ),
                             ),
                           ),
@@ -1628,7 +1628,7 @@ class _MailHomeState extends State<MailHome>
       background: Container(
         alignment: Alignment.centerLeft,
         padding: const EdgeInsets.symmetric(horizontal: 24),
-        color: const Color(0xFF168A73),
+        color: const Color(0xFF258773),
         child: const Icon(Icons.mark_email_read_rounded, color: Colors.white),
       ),
       secondaryBackground: Container(
@@ -1871,6 +1871,21 @@ class _MailHomeState extends State<MailHome>
               } catch (e) {
                 if (mounted) _notice(friendlyMailError(e));
               }
+            },
+          ),
+          if (Platform.isAndroid) ListTile(
+            leading: Icon(_liveSyncRunning ? Icons.notifications_active_rounded : Icons.sync_lock_rounded),
+            title: const Text('Fast background mail sync'),
+            subtitle: Text(_liveSyncEnabled
+                ? '2-minute checks with ongoing notification; Android may pause the service'
+                : 'Off · periodic Android checks (15+ minutes)'),
+            trailing: Switch(value: _liveSyncEnabled, onChanged: _accounts.isEmpty ? null : (_) {
+              Navigator.pop(context);
+              unawaited(_toggleLiveSync());
+            }),
+            onTap: _accounts.isEmpty ? null : () {
+              Navigator.pop(context);
+              unawaited(_toggleLiveSync());
             },
           ),
           const Divider(),

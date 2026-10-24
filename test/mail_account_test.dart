@@ -15,6 +15,38 @@ void main() {
     expect(other.map((candidate) => candidate.host), ['mail.example.org', 'example.org']);
   });
 
+  test('all owned ParmTech-hosted mail domains share one TLS host', () {
+    final owned = [
+      cPanelHostCandidates('info@parmtech.au'),
+      cPanelHostCandidates('info@manbirtong.com'),
+    ];
+    for (final hosts in owned) {
+      expect(hosts.first.host, 'premium214.web-hosting.com');
+    }
+    expect(recommendedSmtpHost('info@manbirtong.com'),
+        'premium214.web-hosting.com');
+  });
+
+  test('saved secure cPanel profile can be reused without copying passwords', () {
+    const first = MailAccount(
+      email: 'admin@parmtech.au',
+      password: 'do-not-copy-password',
+      imapHost: 'premium214.web-hosting.com',
+      smtpHost: 'premium214.web-hosting.com',
+    );
+    const second = MailAccount(
+      email: 'info@manbirtong.com',
+      password: 'unrelated-password',
+      imapHost: 'premium214.web-hosting.com',
+      smtpHost: 'premium214.web-hosting.com',
+    );
+    final profiles = reusableMailServers([first, second]);
+    expect(profiles.length, 1);
+    expect(profiles.single.sourceEmail, 'admin@parmtech.au');
+    expect(profiles.single.imapHost, 'premium214.web-hosting.com');
+    expect(profiles.single.smtpHost, 'premium214.web-hosting.com');
+  });
+
   test('Yahoo and Gmail use provider SSL/TLS hosts, not the website domain', () {
     expect(cPanelHostCandidates('someone@yahoo.com').single.host,
         'imap.mail.yahoo.com');

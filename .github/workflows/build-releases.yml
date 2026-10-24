@@ -72,10 +72,10 @@ jobs:
           $sourceDir = (Resolve-Path "build\windows\x64\runner\Release").Path
           $outputDir = Join-Path $PWD "artifacts"
           New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
-          $versionText = (Get-Content pubspec.yaml | Where-Object { $_ -match '^version:\\s*' } | Select-Object -First 1)
+          $versionText = (Get-Content pubspec.yaml | Where-Object { $_ -match '^version:\s*' } | Select-Object -First 1)
           if (!$versionText) { throw "Could not read app version from pubspec.yaml" }
-          $appVersion = (($versionText -replace '^version:\\s*', '') -split '\\+')[0].Trim()
-          if ($appVersion -notmatch '^\\d+\\.\\d+\\.\\d+
+          $appVersion = (($versionText -replace '^version:\s*', '') -split '\+')[0].Trim()
+          if ($appVersion -notmatch '^\d+\.\d+\.\d+
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:

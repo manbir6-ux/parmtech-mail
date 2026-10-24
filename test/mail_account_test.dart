@@ -6,11 +6,38 @@ void main() {
     final parmtech = cPanelHostCandidates('info@parmtech.au');
     expect(parmtech.map((candidate) => candidate.host), [
       'premium214.web-hosting.com',
+      'mail.parmtech.au',
       'parmtech.au',
     ]);
 
     final other = cPanelHostCandidates('admin@example.org');
-    expect(other.map((candidate) => candidate.host), ['example.org', 'mail.example.org']);
+    expect(other.map((candidate) => candidate.host), ['mail.example.org', 'example.org']);
+  });
+
+  test('Yahoo and Gmail use provider SSL/TLS hosts, not the website domain', () {
+    expect(cPanelHostCandidates('someone@yahoo.com').single.host,
+        'imap.mail.yahoo.com');
+    expect(recommendedSmtpHost('someone@yahoo.com'), 'smtp.mail.yahoo.com');
+    expect(cPanelHostCandidates('user@gmail.com').single.host,
+        'imap.gmail.com');
+    expect(recommendedSmtpHost('user@gmail.com'), 'smtp.gmail.com');
+    expect(cPanelHostCandidates('admin@other-domain.com').first.host,
+        'mail.other-domain.com');
+    expect(mailSetupHint('user@yahoo.com'), contains('App Password'));
+  });
+
+  test('explicit TLS hostname preference is retained after serialization', () {
+    const account = MailAccount(
+      email: 'sales@example.org',
+      password: 'secret',
+      imapHost: 'server123.hosting.example',
+      smtpHost: 'server123.hosting.example',
+      useCustomServer: true,
+    );
+    final recovered = MailAccount.fromJson(account.toJson());
+    expect(recovered.useCustomServer, isTrue);
+    expect(recovered.imapHost, account.imapHost);
+    expect(recovered.smtpHost, account.smtpHost);
   });
 
   test('custom IMAP and SMTP settings require a TLS-capable hostname', () {

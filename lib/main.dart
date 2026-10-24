@@ -2070,7 +2070,7 @@ class MailDetailPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Text('Message'),
+      title: Text(conversation.length > 1 ? 'Conversation (${conversation.length})' : 'Message'),
       actions: [PopupMenuButton<String>(onSelected: (action) async {
         if (action == 'move') {
           final target = await showModalBottomSheet<MailFolder>(context: context, showDragHandle: true, builder: (ctx) => SafeArea(child: ListView(shrinkWrap: true, children: [for (final folder in folders.where((f) => f.path != message.mailboxPath)) ListTile(leading: const Icon(Icons.folder_outlined), title: Text(folder.name), onTap: () => Navigator.pop(ctx, folder))])));
@@ -2102,6 +2102,19 @@ class MailDetailPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
+          if (conversation.length > 1) ...[
+            for (final earlier in conversation.where((m) => m.identity != message.identity))
+              Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ExpansionTile(
+                  title: Text(earlier.sender, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  subtitle: Text(earlier.body, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  trailing: Text(earlier.time, style: const TextStyle(fontSize: 10, color: _muted)),
+                  children: [Padding(padding: const EdgeInsets.all(16), child: SelectableText(earlier.body))],
+                ),
+              ),
+            const SizedBox(height: 12),
+          ],
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -2157,6 +2170,10 @@ class MailDetailPage extends StatelessWidget {
             OutlinedButton.icon(onPressed: account == null || service == null ? null : () => _compose(context, account!, service!, subject: 'Fwd: ${message.subject}', body: '\n\n---------- Forwarded message ----------\nFrom: ${message.senderAddress}\nDate: ${message.time}\nSubject: ${message.subject}\n\n${message.body}'), icon: const Icon(Icons.forward_rounded), label: const Text('Forward')),
             OutlinedButton.icon(onPressed: () => _print(context), icon: const Icon(Icons.print_outlined), label: const Text('Print')),
           ]),
+          if (account != null && service != null) ...[
+            const SizedBox(height: 18),
+            InlineReplyBox(account: account!, mailService: service!, message: message, onSent: onSent),
+          ],
         ],
       ),
     ),

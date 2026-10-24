@@ -1,7 +1,7 @@
 # Acceptance criteria and current status
 
 - [x] Add a cPanel mailbox with email and password; verify IMAP before saving.
-- [x] Try secure host candidates with IMAP 993; for `parmtech.au`, prefer the cPanel URL hostname `premium214.web-hosting.com`, then the domain `parmtech.au`.
+- [x] Require the same private `premium214.web-hosting.com` hostname for all IMAP 993 and SMTP 465 connections, regardless of mailbox domain, including imported accounts.
 - [x] Stop host fallback on authentication failure.
 - [x] Fetch recent Inbox messages and compose/send through authenticated SMTP 465.
 - [x] Show sender names, message dates, safe text for HTML-only mail, and a scrollable full-screen reader.
@@ -14,7 +14,9 @@
 - [x] Erase cached message bodies when an account is removed, and include every cached folder for every saved account in encrypted backups.
 - [ ] Verify offline cache and message-action persistence across app restarts on physical devices.
 - [x] Add basic plain-text reply/forward, print, and up to 20 MB total outgoing attachments.
-- [x] Support separately configurable secure IMAP/SMTP hostnames and cPanel fallback.
+- [x] Hide hostname controls and authenticate only against the single ParmTech server, with validated TLS.
+- [x] Provide six palettes (3 dark, 3 light), six local system font styles, and three inbox layouts with on-device persistence and UI tests.
+- [ ] Verify visuals across Android/iOS screen sizes and real device fonts; verify real IMAP authentication/SMTP send.
 - [x] Use bounded two-account concurrent foreground polling with one aggregated new-mail alert.
 - [ ] Add received-attachment downloads, richer safe HTML rendering, drafts, and background scheduling for iOS and desktop.
 - [ ] Verify notification behavior independently on current Android and iOS devices; no instant push guarantee is made.

@@ -3,65 +3,69 @@ import 'package:parm_mail/data/accounts/mail_account.dart';
 import 'package:parm_mail/data/mail/cpanel_mail_service.dart';
 
 void main() {
-  test('ParmTech cPanel hostname is preferred; domain is fallback', () {
-    final parmtech = cPanelHostCandidates('info@parmtech.au');
-    expect(parmtech.map((candidate) => candidate.host), [
-      'premium214.web-hosting.com',
-      'mail.parmtech.au',
-      'parmtech.au',
-    ]);
-
-    final other = cPanelHostCandidates('admin@example.org');
-    expect(other.map((candidate) => candidate.host), ['mail.example.org', 'example.org']);
+  test('all email domains use the same private server for incoming and outgoing', () {
+    for (final email in [
+      'info@parmtech.au',
+      'info@manbirtong.com',
+      'support@client-domain.com',
+      'test@gmail.com',
+      'test@yahoo.com',
+    ]) {
+      expect(cPanelHostCandidates(email).map((candidate) => candidate.host),
+          [parmTechMailServerHost]);
+      expect(recommendedSmtpHost(email), parmTechMailServerHost);
+    }
+    expect(cPanelHostCandidates('not-an-email'), isEmpty);
+    expect(recommendedSmtpHost('not-an-email'), isEmpty);
   });
 
-  test('Yahoo and Gmail use provider SSL/TLS hosts, not the website domain', () {
-    expect(cPanelHostCandidates('someone@yahoo.com').single.host,
-        'imap.mail.yahoo.com');
-    expect(recommendedSmtpHost('someone@yahoo.com'), 'smtp.mail.yahoo.com');
-    expect(cPanelHostCandidates('user@gmail.com').single.host,
-        'imap.gmail.com');
-    expect(recommendedSmtpHost('user@gmail.com'), 'smtp.gmail.com');
-    expect(cPanelHostCandidates('admin@other-domain.com').first.host,
-        'mail.other-domain.com');
-    expect(mailSetupHint('user@yahoo.com'), contains('App Password'));
-  });
-
-  test('explicit TLS hostname preference is retained after serialization', () {
-    const account = MailAccount(
-      email: 'sales@example.org',
-      password: 'secret',
-      imapHost: 'server123.hosting.example',
-      smtpHost: 'server123.hosting.example',
+  test('legacy hostnames are overridden upon account restoration', () {
+    const oldAccount = MailAccount(
+      email: 'info@client-domain.com',
+      password: 'private-password',
+      imapHost: 'mail.client-domain.com',
+      smtpHost: 'smtp.mail.yahoo.com',
       useCustomServer: true,
     );
-    final recovered = MailAccount.fromJson(account.toJson());
-    expect(recovered.useCustomServer, isTrue);
-    expect(recovered.imapHost, account.imapHost);
-    expect(recovered.smtpHost, account.smtpHost);
+    final restored = MailAccount.fromJson(oldAccount.toJson());
+    expect(restored.imapHost, parmTechMailServerHost);
+    expect(restored.smtpHost, parmTechMailServerHost);
+    expect(restored.useCustomServer, isFalse);
+    expect(restored.email, oldAccount.email);
+    expect(restored.password, oldAccount.password);
   });
 
-  test('custom IMAP and SMTP settings require a TLS-capable hostname', () {
-    expect(isValidMailServerHost('premium214.web-hosting.com'), isTrue);
-    expect(isValidMailServerHost('mail.example.org'), isTrue);
-    expect(isValidMailServerHost('https://example.org'), isFalse);
-    expect(isValidMailServerHost('example.org:993'), isFalse);
-    expect(isValidMailServerHost('invalid host.example.org'), isFalse);
-    expect(isValidMailServerHost(''), isFalse);
+  test('imported account hostnames are always forced to the private host', () {
+    final imported = MailAccount.fromJson({
+      'email': 'support@client.com',
+      'password': 'not-shared',
+      'imapHost': 'attacker.example.org',
+      'smtpHost': 'untrusted.example.org',
+      'useCustomServer': true,
+    });
+    expect(imported.imapHost, parmTechMailServerHost);
+    expect(imported.smtpHost, parmTechMailServerHost);
+    expect(imported.useCustomServer, isFalse);
   });
 
-  test('TLS setup errors are not flattened into generic notifications', () {
+  test('private mail hint does not suggest other providers', () {
+    expect(mailSetupHint('sales@example.com'), contains('Private ParmTech'));
+    expect(mailSetupHint('sales@example.com'), contains('Only mailboxes'));
+  });
+
+  test('TLS failures still surface to the user', () {
     const message = 'Could not connect to IMAP securely. '
-        'Tried: mail.example.org:993 (TLS certificate or handshake failed).';
+        'Tried: premium214.web-hosting.com:993 '
+        '(TLS certificate or handshake failed).';
     expect(friendlyMailError(const MailConnectionException(message)), message);
   });
 
-  test('mailbox email is normalized for account identity', () {
+  test('mailbox identity uses the normalized full email address', () {
     const account = MailAccount(
       email: ' Info@ParmTech.au ',
       password: 'never-log-this',
-      imapHost: 'parmtech.au',
-      smtpHost: 'parmtech.au',
+      imapHost: parmTechMailServerHost,
+      smtpHost: parmTechMailServerHost,
     );
     expect(account.id, 'info@parmtech.au');
   });

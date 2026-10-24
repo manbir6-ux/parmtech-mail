@@ -1,0 +1,82 @@
+name: ParmTech Mail APK and Appetize builds
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: mail-packages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android-apk:
+    name: Test and build Android APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate Flutter platform project
+        run: flutter create . --platforms=android,ios,windows,macos,linux
+      - name: Prepare Android security and Gradle config
+        run: python3 tool/prepare_android.py
+      - name: Configure permanent Android signing when repository keys exist
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: python3 tool/configure_android_signing.py
+      - name: Install dependencies
+        run: flutter pub get
+      - name: Flutter static analysis
+        run: flutter analyze
+      - name: Install Linux desktop test dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libgtk-3-dev libx11-dev libxi-dev
+      - name: Flutter tests
+        run: flutter test
+      - name: Build Android APK
+        run: flutter build apk --release
+      - name: Publish Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ParmTech-Mail-Android-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
+
+  ios-simulator:
+    name: Build Appetize iOS simulator bundle
+    needs: android-apk
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - name: Generate iOS project
+        run: flutter create . --platforms=android,ios,windows,macos,linux
+      - name: Prepare iOS project
+        run: python3 tool/prepare_ios.py
+      - name: Install Flutter dependencies
+        run: flutter pub get
+      - name: Build unsigned iOS simulator app
+        run: flutter build ios --debug --simulator --no-codesign
+      - name: Package Runner.app for Appetize.io
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd build/ios/iphonesimulator
+          test -d Runner.app
+          ditto -c -k --sequesterRsrc --keepParent Runner.app ParmTech-Mail-Appetize-iOS-Simulator.zip
+      - name: Publish Appetize simulator ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: ParmTech-Mail-Appetize-iOS-ZIP
+          path: build/ios/iphonesimulator/ParmTech-Mail-Appetize-iOS-Simulator.zip
+          if-no-files-found: error

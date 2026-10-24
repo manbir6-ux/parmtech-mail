@@ -11,6 +11,7 @@ import 'package:window_manager/window_manager.dart';
 import 'data/background/mail_background_sync.dart';
 import 'data/background/live_mail_service.dart';
 import 'data/accounts/mail_account.dart';
+import 'data/appearance/mail_appearance.dart';
 import 'data/accounts/secure_account_vault.dart';
 import 'data/backup/encrypted_mail_backup.dart';
 import 'data/mail/cpanel_mail_service.dart';
@@ -34,12 +35,44 @@ Future<void> main() async {
   runApp(const ParmMailApp());
 }
 
-bool _darkTheme = false;
-Color get _ink => _darkTheme ? const Color(0xFF0C1323) : const Color(0xFFF4F6FB);
-Color get _panel => _darkTheme ? const Color(0xFF182238) : Colors.white;
+MailAppearance _activeAppearance = const MailAppearance();
+bool get _darkTheme => _activeAppearance.palette.isDark;
+Color get _panel => _activeAppearance.palette.surface;
 const _orange = Color(0xFF5066E9);
 const _sky = Color(0xFF08A7C7);
 const _muted = Color(0xFF78869B);
+
+ThemeData _mailTheme(Brightness brightness) {
+  final palette = _activeAppearance.palette;
+  final scheme = ColorScheme.fromSeed(
+    seedColor: palette.accent,
+    brightness: brightness,
+    surface: palette.surface,
+  );
+  return ThemeData(
+    useMaterial3: true,
+    brightness: brightness,
+    scaffoldBackgroundColor: palette.background,
+    colorScheme: scheme,
+    fontFamily: _activeAppearance.font.family,
+    appBarTheme: AppBarTheme(backgroundColor: palette.background, elevation: 0),
+    textTheme: const TextTheme(
+      headlineLarge: TextStyle(fontWeight: FontWeight.w900, letterSpacing: -1.2),
+      headlineSmall: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -.6),
+      titleLarge: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -.4),
+      titleMedium: TextStyle(fontWeight: FontWeight.w700, letterSpacing: -.25),
+      bodyMedium: TextStyle(fontSize: 14, height: 1.35),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: palette.surface,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide.none,
+      ),
+    ),
+  );
+}
 
 class ParmMailApp extends StatefulWidget {
   const ParmMailApp({super.key});
@@ -49,74 +82,49 @@ class ParmMailApp extends StatefulWidget {
 }
 
 class _ParmMailAppState extends State<ParmMailApp> {
-  void _toggleTheme() => setState(() {
-    _darkTheme = !_darkTheme;
-  });
+  final _appearanceStore = MailAppearanceStore();
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_restoreAppearance());
+  }
+
+  Future<void> _restoreAppearance() async {
+    final saved = await _appearanceStore.load();
+    if (!mounted) return;
+    setState(() => _activeAppearance = saved);
+  }
+
+  void _changeAppearance(MailAppearance value) {
+    setState(() => _activeAppearance = value);
+    unawaited(_appearanceStore.save(value));
+  }
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'Parmtech Mail',
+    title: 'ParmTech Mail',
     debugShowCheckedModeBanner: false,
     themeMode: _darkTheme ? ThemeMode.dark : ThemeMode.light,
-    theme: ThemeData(
-      useMaterial3: true,
-      brightness: Brightness.light,
-      scaffoldBackgroundColor: _ink,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: _orange,
-        brightness: Brightness.light,
-        surface: _panel,
-      ),
-      appBarTheme: AppBarTheme(backgroundColor: _ink, elevation: 0),
-      textTheme: const TextTheme(
-        headlineLarge: TextStyle(fontWeight: FontWeight.w900, letterSpacing: -1.2),
-        headlineSmall: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -.6),
-        titleLarge: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -.4),
-        titleMedium: TextStyle(fontWeight: FontWeight.w700, letterSpacing: -.25),
-        bodyMedium: TextStyle(fontSize: 14, height: 1.35),
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: _panel,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: BorderSide.none,
-        ),
-      ),
+    theme: _mailTheme(Brightness.light),
+    darkTheme: _mailTheme(Brightness.dark),
+    home: MailHome(
+      appearance: _activeAppearance,
+      onAppearanceChanged: _changeAppearance,
     ),
-    darkTheme: ThemeData(
-      useMaterial3: true,
-      brightness: Brightness.dark,
-      scaffoldBackgroundColor: _ink,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: _orange,
-        brightness: Brightness.dark,
-        surface: _panel,
-      ),
-      appBarTheme: AppBarTheme(backgroundColor: _ink, elevation: 0),
-      textTheme: const TextTheme(
-        headlineLarge: TextStyle(fontWeight: FontWeight.w900, letterSpacing: -1.2),
-        headlineSmall: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -.6),
-        titleLarge: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -.4),
-        titleMedium: TextStyle(fontWeight: FontWeight.w700, letterSpacing: -.25),
-        bodyMedium: TextStyle(fontSize: 14, height: 1.35),
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: _panel,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: BorderSide.none,
-        ),
-      ),
-    ),
-    home: MailHome(onThemeToggle: _toggleTheme),
   );
 }
 
 class MailHome extends StatefulWidget {
-  const MailHome({super.key, required this.onThemeToggle});
-  final VoidCallback onThemeToggle;
+  const MailHome({
+    super.key,
+    required this.appearance,
+    required this.onAppearanceChanged,
+  });
+
+  final MailAppearance appearance;
+  final ValueChanged<MailAppearance> onAppearanceChanged;
+
   @override
   State<MailHome> createState() => _MailHomeState();
 }
@@ -814,8 +822,6 @@ class _MailHomeState extends State<MailHome>
       final path = await FilePicker.saveFile(
         fileName: 'Parmtech-Mail-Backup.ptmail',
         bytes: bytes,
-        type: FileType.custom,
-        allowedExtensions: const ['ptmail'],
       );
       if (path != null && mounted) _notice('Encrypted backup saved. Keep the passphrase safe.');
     } catch (e) { if (mounted) _notice('Backup could not be created: ${friendlyMailError(e)}'); }
@@ -1533,9 +1539,9 @@ class _MailHomeState extends State<MailHome>
         child: RefreshIndicator(
           onRefresh: _refresh,
           child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(14, 2, 14, 100),
+            padding: EdgeInsets.fromLTRB(widget.appearance.layout == MailLayout.compact ? 9 : 14, 2, widget.appearance.layout == MailLayout.compact ? 9 : 14, 100),
             itemCount: conversations.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 7),
+            separatorBuilder: (_, _) => SizedBox(height: widget.appearance.layout == MailLayout.compact ? 2 : widget.appearance.layout == MailLayout.cards ? 13 : 7),
             itemBuilder: (context, index) => _tile(
               conversations[index].latest,
               compact: true,
@@ -1559,6 +1565,8 @@ class _MailHomeState extends State<MailHome>
     VoidCallback? onTap,
   }) {
     final colors = Theme.of(context).colorScheme;
+    final compactStyle = widget.appearance.layout == MailLayout.compact;
+    final cardsStyle = widget.appearance.layout == MailLayout.cards;
     final selectedForAction = _selectedMessageIds.contains(mail.identity);
     final highlighted = selected || selectedForAction;
     const avatarPalette = <Color>[
@@ -1570,7 +1578,7 @@ class _MailHomeState extends State<MailHome>
     final senderHash = mail.sender.codeUnits.fold<int>(0, (a, b) => a + b);
     final avatarColor = avatarPalette[senderHash % avatarPalette.length];
     final shape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(17),
+      borderRadius: BorderRadius.circular(cardsStyle ? 23 : compactStyle ? 10 : 17),
       side: BorderSide(
         color: highlighted
             ? _orange.withValues(alpha: .38)
@@ -1602,21 +1610,22 @@ class _MailHomeState extends State<MailHome>
             _open(mail);
           }
         },
-        onLongPress: () => _showMailActions(mail),
+        onLongPress: () => setState(() { _selectedMessageIds.add(mail.identity); }),
+        onSecondaryTap: () => _showMailActions(mail),
         child: Semantics(
           button: true,
           label: 'Email from ${mail.sender}. ${mail.subject}. ${mail.time}',
           child: Padding(
             padding: EdgeInsets.symmetric(
-              horizontal: compact ? 13 : 15,
-              vertical: compact ? 13 : 15,
+              horizontal: compactStyle ? 10 : cardsStyle ? 19 : compact ? 13 : 15,
+              vertical: compactStyle ? 8 : cardsStyle ? 20 : compact ? 13 : 15,
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
-                  width: compact ? 43 : 46,
-                  height: compact ? 43 : 46,
+                  width: compactStyle ? 34 : cardsStyle ? 52 : compact ? 43 : 46,
+                  height: compactStyle ? 34 : cardsStyle ? 52 : compact ? 43 : 46,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     color: avatarColor.withValues(alpha: _darkTheme ? .23 : .13),
@@ -1636,7 +1645,7 @@ class _MailHomeState extends State<MailHome>
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: compactStyle ? 8 : 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1652,7 +1661,7 @@ class _MailHomeState extends State<MailHome>
                                 fontWeight: mail.unread
                                     ? FontWeight.w900
                                     : FontWeight.w700,
-                                fontSize: compact ? 14 : 15,
+                                fontSize: compactStyle ? 13 : cardsStyle ? 16 : compact ? 14 : 15,
                                 height: 1.15,
                                 letterSpacing: -.25,
                               ),
@@ -1678,7 +1687,7 @@ class _MailHomeState extends State<MailHome>
                           ],
                         ],
                       ),
-                      const SizedBox(height: 6),
+                      SizedBox(height: compactStyle ? 2 : 6),
                       Text(
                         mail.subject.isEmpty ? '(No subject)' : mail.subject,
                         maxLines: 1,
@@ -1687,12 +1696,12 @@ class _MailHomeState extends State<MailHome>
                           fontWeight: mail.unread
                               ? FontWeight.w800
                               : FontWeight.w600,
-                          fontSize: compact ? 13.5 : 14,
+                          fontSize: compactStyle ? 12.5 : cardsStyle ? 15 : compact ? 13.5 : 14,
                           height: 1.2,
                           letterSpacing: -.15,
                         ),
                       ),
-                      const SizedBox(height: 6),
+                      SizedBox(height: compactStyle ? 2 : cardsStyle ? 10 : 6),
                       Row(
                         children: [
                           if (threadCount > 1) ...[
@@ -1719,10 +1728,10 @@ class _MailHomeState extends State<MailHome>
                           Expanded(
                             child: Text(
                               mail.body.replaceAll(RegExp(r'\s+'), ' ').trim(),
-                              maxLines: 1,
+                              maxLines: cardsStyle ? 2 : 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                fontSize: 12,
+                                fontSize: compactStyle ? 10 : cardsStyle ? 13 : 12,
                                 color: colors.onSurfaceVariant,
                                 height: 1.2,
                               ),
@@ -2041,8 +2050,8 @@ class _MailHomeState extends State<MailHome>
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
         builder: (_) => MailSettingsPage(
-          darkTheme: _darkTheme,
-          onThemeToggle: widget.onThemeToggle,
+          appearance: widget.appearance,
+          onAppearanceChanged: widget.onAppearanceChanged,
           accountEmails: _accounts.map((a) => a.email).toList(),
           onAddAccount: () async {
             Navigator.of(context).pop();
@@ -2207,6 +2216,7 @@ class _MailHomeState extends State<MailHome>
 
 class AddAccountPage extends StatefulWidget {
   const AddAccountPage({super.key});
+
   @override
   State<AddAccountPage> createState() => _AddAccountPageState();
 }
@@ -2371,8 +2381,6 @@ class MailDetailPage extends StatelessWidget {
 class _AddAccountPageState extends State<AddAccountPage> {
   final _email = TextEditingController();
   final _password = TextEditingController();
-  final _imapHost = TextEditingController();
-  final _smtpHost = TextEditingController();
   final _verifyService = CpanelMailService();
   bool _hide = true;
   bool _testing = false;
@@ -2381,8 +2389,6 @@ class _AddAccountPageState extends State<AddAccountPage> {
   void dispose() {
     _email.dispose();
     _password.dispose();
-    _imapHost.dispose();
-    _smtpHost.dispose();
     super.dispose();
   }
 
@@ -2442,53 +2448,36 @@ class _AddAccountPageState extends State<AddAccountPage> {
                 ),
               ),
             ),
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Text(
-                mailSetupHint(_email.text),
-                style: const TextStyle(fontSize: 12, height: 1.5, color: _muted),
+            const SizedBox(height: 18),
+            Container(
+              padding: const EdgeInsets.all(15),
+              decoration: BoxDecoration(
+                color: _orange.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: _orange.withValues(alpha: 0.16)),
               ),
-            ),
-            if (isValidMailAddress(_email.text)) ...[
-              const SizedBox(height: 5),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Text(
-                  'Suggested: IMAP ${cPanelHostCandidates(_email.text).first.host} · SMTP ${recommendedSmtpHost(_email.text)}',
-                  style: const TextStyle(fontSize: 11, color: _orange),
-                ),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.verified_user_rounded, color: _orange, size: 23),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('ParmTech Private Mail',
+                            style: TextStyle(fontWeight: FontWeight.w800)),
+                        SizedBox(height: 5),
+                        Text(
+                          'Only mailboxes created on the ParmTech hosting server can sign in. '
+                          'Secure IMAP and SMTP are configured automatically.',
+                          style: TextStyle(fontSize: 12, color: _muted, height: 1.45),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-            ],
-            const SizedBox(height: 10),
-            ExpansionTile(
-              tilePadding: EdgeInsets.zero,
-              title: const Text('Advanced server settings'),
-              subtitle: const Text('Use exact Secure SSL/TLS server names from your provider'),
-              children: [
-                TextField(
-                  controller: _imapHost,
-                  textInputAction: TextInputAction.next,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: 'IMAP hostname (optional)',
-                    hintText: 'mail.example.com',
-                    helperText: 'Secure IMAP port 993',
-                    prefixIcon: Icon(Icons.dns_outlined),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _smtpHost,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: 'SMTP hostname (optional)',
-                    hintText: 'mail.example.com',
-                    helperText: 'Secure SMTP port 465',
-                    prefixIcon: Icon(Icons.outgoing_mail),
-                  ),
-                ),
-              ],
             ),
             const SizedBox(height: 22),
             if (_connectionError != null) ...[
@@ -2517,7 +2506,8 @@ class _AddAccountPageState extends State<AddAccountPage> {
                     ),
                     const SizedBox(height: 8),
                     const Text(
-                      'You can adjust the IMAP/SMTP hostnames above and retry without retyping your password.',
+                      'Check that this mailbox exists on the ParmTech hosting server '
+                      'and that its password is correct. TLS errors must be fixed on the server.',
                       style: TextStyle(fontSize: 12),
                     ),
                   ],
@@ -2555,24 +2545,6 @@ class _AddAccountPageState extends State<AddAccountPage> {
       );
       return;
     }
-    final recommended = cPanelHostCandidates(email);
-    if (recommended.isEmpty) return;
-    final manual = _imapHost.text.trim().isNotEmpty ||
-        _smtpHost.text.trim().isNotEmpty;
-    final imapHost = _imapHost.text.trim().isEmpty
-        ? recommended.first.host
-        : _imapHost.text.trim().toLowerCase();
-    final smtpHost = _smtpHost.text.trim().isEmpty
-        ? recommendedSmtpHost(email)
-        : _smtpHost.text.trim().toLowerCase();
-    if (!isValidMailServerHost(imapHost) ||
-        !isValidMailServerHost(smtpHost)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Enter DNS hostnames without https:// or port numbers.'),
-      ));
-      return;
-    }
-
     setState(() {
       _testing = true;
       _connectionError = null;
@@ -2581,9 +2553,8 @@ class _AddAccountPageState extends State<AddAccountPage> {
       final verified = await _verifyService.verify(MailAccount(
         email: email,
         password: _password.text,
-        imapHost: imapHost,
-        smtpHost: smtpHost,
-        useCustomServer: manual,
+        imapHost: parmTechMailServerHost,
+        smtpHost: parmTechMailServerHost,
       ));
       if (mounted) Navigator.pop(context, verified);
     } catch (error) {

@@ -131,14 +131,10 @@ class CpanelMailService {
       return model.MailAccount(
         email: account.email.trim(),
         password: account.password,
-        imapHost: session.host,
-        // Preserve a separately configured outgoing server. For automatic
-        // single-host setup, follow the verified IMAP hostname.
-        smtpHost: account.smtpHost.trim() == account.imapHost.trim()
-            ? session.host
-            : account.smtpHost.trim(),
+        imapHost: model.parmTechMailServerHost,
+        smtpHost: model.parmTechMailServerHost,
         displayName: account.displayName,
-        useCustomServer: account.useCustomServer,
+        useCustomServer: false,
       );
     } finally {
       await _closeImap(session.client);
@@ -380,12 +376,8 @@ class CpanelMailService {
     if (!model.isValidMailAddress(to)) {
       throw const MailConnectionException('Enter a valid recipient email address.');
     }
-    final candidates = <String>{
-      account.smtpHost.trim(),
-      if (!account.useCustomServer) account.imapHost.trim(),
-      if (!account.useCustomServer)
-        ...model.cPanelHostCandidates(account.email).map((e) => e.host),
-    }.where((host) => host.isNotEmpty);
+    // Never send mailbox credentials to user-entered or inferred servers.
+    const candidates = <String>{model.parmTechMailServerHost};
     final connectionErrors = <String>[];
 
     for (final host in candidates) {
@@ -479,11 +471,9 @@ class CpanelMailService {
   }
 
   Future<_ImapSession> _connectAndLogin(model.MailAccount account) async {
-    final hosts = <String>{
-      account.imapHost.trim(),
-      if (!account.useCustomServer)
-        ...model.cPanelHostCandidates(account.email).map((candidate) => candidate.host),
-    }.where((host) => host.trim().isNotEmpty);
+    // Single-server private client. This remains true for imported backups
+    // and accounts saved by older versions of the app.
+    const hosts = <String>{model.parmTechMailServerHost};
     final connectionErrors = <String>[];
     var sawTlsFailure = false;
 
@@ -515,11 +505,10 @@ class CpanelMailService {
     }
 
     final recommendation = sawTlsFailure
-        ? 'TLS certificate validation failed on at least one host. '
-          'Use the exact Incoming Server from your provider’s Secure SSL/TLS '
-          'mail settings (cPanel → Email Accounts → Connect Devices).'
-        : 'Check the incoming server hostname and network connection. '
-          'Use the exact secure IMAP hostname supplied by your mail provider.';
+        ? 'The ParmTech mail server certificate could not be verified. '
+          'The server administrator should check the hostname and TLS certificate.'
+        : 'Could not contact the private ParmTech mail server. '
+          'Check your connection or contact the server administrator.';
     throw MailConnectionException(
       'Could not connect to IMAP securely. $recommendation '
       'Tried: ${connectionErrors.join('; ')}.',

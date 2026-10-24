@@ -22,105 +22,53 @@ class MailAccount {
 
   String get id => email.trim().toLowerCase();
 
+  // Legacy account records may carry old hostname guesses. Never reuse
+  // those endpoints: all active sessions must use the private mail server.
   Map<String, Object?> toJson() => {
     'email': email,
     'password': password,
-    'imapHost': imapHost,
-    'smtpHost': smtpHost,
+    'imapHost': parmTechMailServerHost,
+    'smtpHost': parmTechMailServerHost,
     'displayName': displayName,
-    'useCustomServer': useCustomServer,
+    'useCustomServer': false,
   };
 
   factory MailAccount.fromJson(Map<String, dynamic> json) => MailAccount(
     email: json['email'] as String,
     password: json['password'] as String,
-    imapHost: json['imapHost'] as String,
-    smtpHost: json['smtpHost'] as String,
+    imapHost: parmTechMailServerHost,
+    smtpHost: parmTechMailServerHost,
     displayName: (json['displayName'] as String?) ?? '',
-    useCustomServer: (json['useCustomServer'] as bool?) ?? false,
+    useCustomServer: false,
   );
 }
+
+/// Reuses the TLS hostnames of an account already verified on this device.
+/// An explicit user choice is required before applying these to another
+/// mailbox, since unrelated email domains may use different providers.
+/// One privately managed mail server for every ParmTech Mail account.
+/// Authentication is attempted only against this host, regardless of domain.
+const String parmTechMailServerHost = 'premium214.web-hosting.com';
 
 class MailServerCandidate {
   const MailServerCandidate(this.host);
   final String host;
 }
 
-/// Provider presets are only host suggestions. A trusted TLS certificate is
-/// required for every connection; no insecure certificate exceptions are used.
-/// cPanel domains can require their hosting server name from Connect Devices.
-List<MailServerCandidate> cPanelHostCandidates(String email) {
-  final domain = email.trim().split('@').last.toLowerCase();
-  if (domain.isEmpty || !domain.contains('.')) return const [];
+/// Single private hosting profile. No guessed mail.domain.com addresses and
+/// no public provider IMAP/SMTP settings (Gmail, Yahoo, etc).
+List<MailServerCandidate> cPanelHostCandidates(String email) =>
+    isValidMailAddress(email)
+        ? const [MailServerCandidate(parmTechMailServerHost)]
+        : const [];
 
-  if (domain == 'parmtech.au') {
-    return const [
-      MailServerCandidate('premium214.web-hosting.com'),
-      MailServerCandidate('mail.parmtech.au'),
-      MailServerCandidate('parmtech.au'),
-    ];
-  }
-  if ((domain.startsWith('yahoo.') ||
-      const {'ymail.com', 'rocketmail.com'}.contains(domain))) {
-    return const [MailServerCandidate('imap.mail.yahoo.com')];
-  }
-  if (const {'gmail.com', 'googlemail.com'}.contains(domain)) {
-    return const [MailServerCandidate('imap.gmail.com')];
-  }
-  if (domain == 'aol.com') {
-    return const [MailServerCandidate('imap.aol.com')];
-  }
-  if (const {'icloud.com', 'me.com', 'mac.com'}.contains(domain)) {
-    return const [MailServerCandidate('imap.mail.me.com')];
-  }
+String recommendedSmtpHost(String email) =>
+    isValidMailAddress(email) ? parmTechMailServerHost : '';
 
-  // Prefer mail.domain over the root website hostname, which often has a
-  // web-only TLS certificate. If neither host matches its cert, the account
-  // must use the provider's explicitly documented secure mail hostname.
-  return [
-    MailServerCandidate('mail.$domain'),
-    MailServerCandidate(domain),
-  ];
-}
-
-String recommendedSmtpHost(String email) {
-  final domain = email.trim().split('@').last.toLowerCase();
-  if ((domain.startsWith('yahoo.') ||
-      const {'ymail.com', 'rocketmail.com'}.contains(domain))) {
-    return 'smtp.mail.yahoo.com';
-  }
-  if (const {'gmail.com', 'googlemail.com'}.contains(domain)) {
-    return 'smtp.gmail.com';
-  }
-  if (domain == 'aol.com') return 'smtp.aol.com';
-  if (const {'icloud.com', 'me.com', 'mac.com'}.contains(domain)) {
-    return 'smtp.mail.me.com';
-  }
-  final candidates = cPanelHostCandidates(email);
-  return candidates.isEmpty ? '' : candidates.first.host;
-}
-
-String mailSetupHint(String email) {
-  final domain = email.trim().split('@').last.toLowerCase();
-  if ((domain.startsWith('yahoo.') ||
-      const {'ymail.com', 'rocketmail.com', 'aol.com'}.contains(domain))) {
-    return 'Yahoo/AOL accounts usually need an App Password from the '
-        'provider account-security page.';
-  }
-  if (const {'gmail.com', 'googlemail.com'}.contains(domain)) {
-    return 'Gmail password-only IMAP access requires an eligible App Password. '
-        'Regular Google sign-in/OAuth is not implemented in this client.';
-  }
-  if (const {'icloud.com', 'me.com', 'mac.com'}.contains(domain)) {
-    return 'iCloud Mail requires an app-specific password for this mail client.';
-  }
-  if (const {'outlook.com', 'hotmail.com', 'live.com', 'office365.com'}.contains(domain)) {
-    return 'Microsoft mail accounts normally require OAuth sign-in. '
-        'This app currently supports password-based IMAP only.';
-  }
-  return 'For cPanel mail: Email Accounts → Connect Devices → Secure SSL/TLS '
-      'Settings. Copy the exact incoming and outgoing server names shown there.';
-}
+String mailSetupHint(String email) =>
+    'Private ParmTech mail hosting only. Only mailboxes created on this '
+    'server can sign in. Secure IMAP 993 and SMTP 465 are configured '
+    'automatically.';
 
 bool isValidMailAddress(String value) {
   final email = value.trim();

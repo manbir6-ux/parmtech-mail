@@ -7,14 +7,20 @@ Premium, cross-platform email client for cPanel/Namecheap mailboxes, built with 
 - Dark premium inbox and responsive onboarding / compose UI.
 - IMAP over validated TLS (993), secure host fallback, inbox fetch and SMTP send over TLS (465).
 - Email + password account setup, with a maximum of 10 accounts.
-- Server-reported folders with Spam/Junk alias de-duplication, compact inbox rows with sender names and dates, local inbox search, explicit account removal and foreground sync alerts.
+- Server-reported folders with Spam/Junk alias de-duplication, custom folder creation, local inbox search, explicit account removal and foreground sync alerts.
+- Swipe right to mark a message read, swipe left to delete, and long-press for selection, sender cleanup, spam, archive, starring and read-state actions. Message view includes reply, forward, move, print, sender and full date/time details.
+- The last fetched folder is cached in OS-backed encrypted storage and remains readable offline. Export/import creates a passphrase-encrypted `.ptmail` backup of saved accounts and cached messages.
 - HTML-only messages are converted to safe readable text; email markup and remote content are not executed.
 - Android background unread checks use WorkManager while the app is backgrounded, require a network connection and run no more frequently than Android permits. iOS and desktop background timing is controlled by each operating system; IMAP polling is not instant push.
 - Passwords stored only in OS-backed secure storage; Android backup is disabled to prevent restoring encrypted credentials without their device key. There is no ParmTech credential server.
 - For `parmtech.au`, IMAP tries the supplied cPanel server `premium214.web-hosting.com` first, then the domain shown in cPanel, `parmtech.au`. It does not guess a `mail.` hostname. A host fallback is attempted for connection errors only; authentication failures stop immediately.
 - CI runs analysis, Flutter tests, Android preparation tests, and release builds for Android, iOS (unsigned), Windows, macOS DMG and Linux on main-branch pushes.
 
-This is an early development build, not a store-ready release. Reply/forward, attachments, offline cache, full HTML rendering and server-based push notifications remain in later milestones. Android may defer scheduled checks because of battery settings, and IMAP polling cannot guarantee instant notifications on shared hosting.
+This is an early development build, not a store-ready release. Attachments, full HTML rendering and server-based push notifications remain later milestones. Android may defer scheduled checks because of battery settings, and IMAP polling cannot guarantee instant notifications on shared hosting.
+
+### Android upgrade signing
+
+To make future APKs install as in-place upgrades, configure these repository Actions secrets once: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD`. The workflow uses that same private keystore for every release. Without those secrets GitHub Actions uses a temporary runner debug key; APKs from separate runs will have different signatures. The first release signed with the permanent key must replace the current debug-signed install once (uninstalling the old app removes its local data, so export a backup first).
 
 ## Requirements and run
 

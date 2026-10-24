@@ -25,15 +25,15 @@ void main() {
       );
     });
 
-    test('formats arrival times for today and older messages', () {
+    test('always shows the calendar date and time', () {
       final now = DateTime(2026, 10, 23, 10, 17);
       expect(
         formatMailTimestamp(DateTime(2026, 10, 23, 9, 5), now: now),
-        '9:05 AM',
+        '23 Oct 2026, 9:05 AM',
       );
       expect(
         formatMailTimestamp(DateTime(2026, 10, 22, 18, 0), now: now),
-        'Yesterday',
+        '22 Oct 2026, 6:00 PM',
       );
       expect(formatMailTimestamp(null, now: now), isEmpty);
     });

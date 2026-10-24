@@ -41,6 +41,14 @@ class SecureAccountVault {
     await _write(accounts);
   }
 
+  Future<void> replaceAll(List<MailAccount> accounts) async {
+    final ids = accounts.map((account) => account.id).toSet();
+    if (accounts.length > maxAccounts || ids.length != accounts.length) {
+      throw const AccountLimitReachedException();
+    }
+    await _write(accounts);
+  }
+
   Future<void> remove(String email) async {
     final id = email.trim().toLowerCase();
     final accounts = (await readAll()).where((item) => item.id != id).toList();
@@ -69,6 +77,15 @@ class SecureAccountVault {
         key: _unreadCountsKey,
         value: jsonEncode(counts),
       );
+
+  Future<String?> readMailCache(String accountId, String folder) =>
+      _storage.read(key: _cacheKey(accountId, folder));
+
+  Future<void> writeMailCache(String accountId, String folder, String value) =>
+      _storage.write(key: _cacheKey(accountId, folder), value: value);
+
+  String _cacheKey(String accountId, String folder) =>
+      'parm_mail.cache.${Uri.encodeComponent(accountId)}.${Uri.encodeComponent(folder)}';
 
   Future<void> clear() => _storage.delete(key: _storageKey);
 

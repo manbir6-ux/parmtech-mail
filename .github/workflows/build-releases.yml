@@ -21,6 +21,13 @@ jobs:
         run: sed -i 's/android:label="parm_mail"/android:label="Parmtech Mail"/' android/app/src/main/AndroidManifest.xml
       - name: Prepare Android network and notification runtime
         run: python3 tool/prepare_android.py
+      - name: Configure stable Android release signing when secrets exist
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: python3 tool/configure_android_signing.py
       - run: flutter pub get
       - run: flutter build apk --release
       - uses: actions/upload-artifact@v4

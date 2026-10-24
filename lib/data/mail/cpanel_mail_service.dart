@@ -14,6 +14,9 @@ class MailItem {
     required this.time,
     required this.sentAt,
     required this.unread,
+    this.uid,
+    this.mailboxPath = 'INBOX',
+    this.starred = false,
   });
 
   final String sender;
@@ -23,6 +26,52 @@ class MailItem {
   final String time;
   final DateTime? sentAt;
   final bool unread;
+  final int? uid;
+  final String mailboxPath;
+  final bool starred;
+
+  String get identity => uid == null
+      ? '$mailboxPath|$senderAddress|$subject|${sentAt?.millisecondsSinceEpoch ?? time}'
+      : '$mailboxPath|$uid';
+
+  Map<String, Object?> toJson() => {
+        'sender': sender,
+        'senderAddress': senderAddress,
+        'subject': subject,
+        'body': body,
+        'time': time,
+        'sentAt': sentAt?.toIso8601String(),
+        'unread': unread,
+        'uid': uid,
+        'mailboxPath': mailboxPath,
+        'starred': starred,
+      };
+
+  factory MailItem.fromJson(Map<String, dynamic> json) => MailItem(
+        sender: json['sender'] as String? ?? '',
+        senderAddress: json['senderAddress'] as String? ?? '',
+        subject: json['subject'] as String? ?? '(no subject)',
+        body: json['body'] as String? ?? '',
+        time: json['time'] as String? ?? '',
+        sentAt: DateTime.tryParse(json['sentAt'] as String? ?? ''),
+        unread: json['unread'] as bool? ?? false,
+        uid: json['uid'] as int?,
+        mailboxPath: json['mailboxPath'] as String? ?? 'INBOX',
+        starred: json['starred'] as bool? ?? false,
+      );
+
+  MailItem copyWith({bool? unread, bool? starred}) => MailItem(
+        sender: sender,
+        senderAddress: senderAddress,
+        subject: subject,
+        body: body,
+        time: time,
+        sentAt: sentAt,
+        unread: unread ?? this.unread,
+        uid: uid,
+        mailboxPath: mailboxPath,
+        starred: starred ?? this.starred,
+      );
 }
 
 class MailFolder {
@@ -151,9 +200,119 @@ class CpanelMailService {
               time: formatMailTimestamp(sentAt),
               sentAt: sentAt,
               unread: !message.isSeen,
+              uid: message.uid,
+              mailboxPath: folderPath,
+              starred: message.isFlagged,
             );
           })
           .toList(growable: false);
+    } finally {
+      await _closeImap(session.client);
+    }
+  }
+
+  Future<void> setRead(model.MailAccount account, MailItem item, bool read) =>
+      _withUid(account, item, (client, sequence) async {
+        if (read) {
+          await client.uidMarkSeen(sequence);
+        } else {
+          await client.uidMarkUnseen(sequence);
+        }
+      });
+
+  Future<void> setStarred(model.MailAccount account, MailItem item, bool starred) =>
+      _withUid(account, item, (client, sequence) async {
+        if (starred) {
+          await client.uidMarkFlagged(sequence);
+        } else {
+          await client.uidMarkUnflagged(sequence);
+        }
+      });
+
+  Future<void> moveMessage(model.MailAccount account, MailItem item, String targetPath) =>
+      _withUid(account, item, (client, sequence) async {
+        await client.uidMove(sequence, targetMailboxPath: targetPath);
+      });
+
+  Future<void> deleteMessage(model.MailAccount account, MailItem item) async {
+    await deleteMessages(account, [item]);
+  }
+
+  Future<void> deleteMessages(model.MailAccount account, List<MailItem> items) async {
+    if (items.isEmpty) return;
+    if (items.any((item) => item.uid == null || item.uid! <= 0)) {
+      throw const MailConnectionException('Refresh messages before deleting them.');
+    }
+    final folders = await listFolders(account);
+    final trash = folders.where((folder) =>
+        RegExp(r'^(trash|deleted|deleted items|bin)$', caseSensitive: false)
+            .hasMatch(folder.name.split(RegExp(r'[/\\.]')).last));
+    final session = await _connectAndLogin(account);
+    try {
+      final byFolder = <String, List<MailItem>>{};
+      for (final item in items) {
+        byFolder.putIfAbsent(item.mailboxPath, () => []).add(item);
+      }
+      for (final entry in byFolder.entries) {
+        if (entry.key.toUpperCase() == 'INBOX') {
+          await session.client.selectInbox();
+        } else {
+          await session.client.selectMailboxByPath(entry.key);
+        }
+        if (trash.isNotEmpty && trash.first.path != entry.key) {
+          for (final item in entry.value) {
+            final uid = item.uid!;
+            await session.client.uidMove(
+              mail.MessageSequence.fromRange(uid, uid, isUidSequence: true),
+              targetMailboxPath: trash.first.path,
+            );
+          }
+        } else {
+          for (final item in entry.value) {
+            final uid = item.uid!;
+            await session.client.uidMarkDeleted(
+              mail.MessageSequence.fromRange(uid, uid, isUidSequence: true),
+            );
+          }
+          await session.client.uidExpunge();
+        }
+      }
+    } finally {
+      await _closeImap(session.client);
+    }
+  }
+
+  Future<void> createFolder(model.MailAccount account, String name) async {
+    final clean = name.trim();
+    if (clean.isEmpty || clean.contains('/') || clean.contains('\\')) {
+      throw const MailConnectionException('Enter a valid folder name.');
+    }
+    final session = await _connectAndLogin(account);
+    try {
+      await session.client.createMailbox(clean);
+    } finally {
+      await _closeImap(session.client);
+    }
+  }
+
+  Future<void> _withUid(
+    model.MailAccount account,
+    MailItem item,
+    Future<void> Function(mail.ImapClient, mail.MessageSequence) action,
+  ) async {
+    final uid = item.uid;
+    if (uid == null || uid <= 0) {
+      throw const MailConnectionException('Refresh this message before applying an action.');
+    }
+    final session = await _connectAndLogin(account);
+    try {
+      if (item.mailboxPath.toUpperCase() == 'INBOX') {
+        await session.client.selectInbox();
+      } else {
+        await session.client.selectMailboxByPath(item.mailboxPath);
+      }
+      await action(session.client,
+          mail.MessageSequence.fromRange(uid, uid, isUidSequence: true));
     } finally {
       await _closeImap(session.client);
     }

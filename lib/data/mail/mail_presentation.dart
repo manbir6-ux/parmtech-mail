@@ -17,30 +17,14 @@ String displaySenderName({
 String formatMailTimestamp(DateTime? timestamp, {DateTime? now}) {
   if (timestamp == null) return '';
   final sentAt = timestamp.toLocal();
-  final current = (now ?? DateTime.now()).toLocal();
-  final sentDay = DateTime(sentAt.year, sentAt.month, sentAt.day);
-  final today = DateTime(current.year, current.month, current.day);
-  final dayDifference = today.difference(sentDay).inDays;
-
-  if (dayDifference == 0) {
-    final hour = sentAt.hour % 12 == 0 ? 12 : sentAt.hour % 12;
-    final minute = sentAt.minute.toString().padLeft(2, '0');
-    final meridiem = sentAt.hour < 12 ? 'AM' : 'PM';
-    return '$hour:$minute $meridiem';
-  }
-  if (dayDifference == 1) return 'Yesterday';
-  if (dayDifference > 1 && dayDifference < 7) {
-    return const ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'][
-      sentAt.weekday - 1
-    ];
-  }
-
   const months = [
     'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
   ];
-  final year = sentAt.year == current.year ? '' : ' ${sentAt.year}';
-  return '${sentAt.day} ${months[sentAt.month - 1]}$year';
+  final hour = sentAt.hour % 12 == 0 ? 12 : sentAt.hour % 12;
+  final minute = sentAt.minute.toString().padLeft(2, '0');
+  final meridiem = sentAt.hour < 12 ? 'AM' : 'PM';
+  return '${sentAt.day} ${months[sentAt.month - 1]} ${sentAt.year}, $hour:$minute $meridiem';
 }
 
 /// Turns HTML-only messages into readable text before showing them in the app.

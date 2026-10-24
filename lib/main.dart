@@ -1,12 +1,17 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:printing/printing.dart';
+import 'package:pdf/widgets.dart' as pw;
 import 'package:tray_manager/tray_manager.dart' as tray;
 import 'package:window_manager/window_manager.dart';
 import 'data/background/mail_background_sync.dart';
 import 'data/accounts/mail_account.dart';
 import 'data/accounts/secure_account_vault.dart';
+import 'data/backup/encrypted_mail_backup.dart';
 import 'data/mail/cpanel_mail_service.dart';
 import 'data/notifications/mail_notifications.dart';
 
@@ -116,6 +121,7 @@ class _MailHomeState extends State<MailHome>
   Timer? _autoSyncTimer;
   tray.TrayIcon? _trayIcon;
   MailItem? _selectedMail;
+  final Set<String> _selectedMessageIds = <String>{};
   bool _quitting = false;
 
   @override
@@ -302,8 +308,23 @@ class _MailHomeState extends State<MailHome>
       _syncing = true;
       _error = null;
     });
+    if (_messages.isEmpty) {
+      try {
+        final cached = await _vault.readMailCache(account.id, folderPath);
+        if (cached != null && mounted && _accounts[_active].id == account.id) {
+          final records = jsonDecode(cached) as List<dynamic>;
+          setState(() => _messages = records
+              .map((entry) => MailItem.fromJson(entry as Map<String, dynamic>))
+              .toList(growable: true));
+        }
+      } catch (_) {
+        // A damaged cache never prevents a fresh server sync.
+      }
+    }
     try {
       final items = await _service.fetchFolder(account, folderPath);
+      await _vault.writeMailCache(account.id, folderPath,
+          jsonEncode(items.map((message) => message.toJson()).toList()));
       final isInbox = folderPath.toUpperCase() == 'INBOX';
       final currentUnread = isInbox
           ? await _service.countUnread(account)
@@ -441,6 +462,7 @@ class _MailHomeState extends State<MailHome>
       _folderPath = folder.path;
       _messages = [];
       _selectedMail = null;
+      _selectedMessageIds.clear();
     });
     await _refresh();
   }
@@ -506,9 +528,216 @@ class _MailHomeState extends State<MailHome>
   Future<void> _open(MailItem message) async {
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
-        builder: (_) => MailDetailPage(message: message),
+        builder: (_) => MailDetailPage(
+          message: message,
+          account: _accounts.isEmpty ? null : _accounts[_active],
+          service: _service,
+          folders: _folders,
+          onAction: (action) => _actOnMail(message, action),
+        ),
       ),
     );
+  }
+
+  Future<void> _actOnMail(MailItem message, String action) async {
+    if (_accounts.isEmpty) return;
+    final account = _accounts[_active];
+    try {
+      switch (action) {
+        case 'delete':
+          await _service.deleteMessage(account, message);
+          break;
+        case 'read':
+          await _service.setRead(account, message, true);
+          break;
+        case 'unread':
+          await _service.setRead(account, message, false);
+          break;
+        case 'star':
+          await _service.setStarred(account, message, !message.starred);
+          break;
+        case 'spam':
+          final spam = _folders.where((f) => _folderTitle(f).toLowerCase() == 'spam');
+          if (spam.isEmpty) throw const MailConnectionException('No Spam folder is available on this server.');
+          await _service.moveMessage(account, message, spam.first.path);
+          break;
+        case 'archive':
+          final archive = _folders.where((f) => _folderTitle(f).toLowerCase() == 'archive');
+          if (archive.isEmpty) throw const MailConnectionException('No Archive folder is available on this server.');
+          await _service.moveMessage(account, message, archive.first.path);
+          break;
+      }
+      if (mounted) {
+        setState(() {
+          if (action == 'delete' || action == 'spam' || action == 'archive') {
+            _messages.removeWhere((m) => m.identity == message.identity);
+            _selectedMessageIds.remove(message.identity);
+          } else {
+            final index = _messages.indexWhere((m) => m.identity == message.identity);
+            if (index >= 0) {
+              _messages[index] = _messages[index].copyWith(
+                unread: action == 'read' ? false : action == 'unread' ? true : null,
+                starred: action == 'star' ? !message.starred : null,
+              );
+            }
+          }
+        });
+        _notice(action == 'read' ? 'Marked as read.' : action == 'unread' ? 'Marked as unread.' : action == 'star' ? 'Star updated.' : 'Message moved.');
+      }
+    } catch (e) {
+      if (mounted && (action == 'delete' || action == 'archive' || action == 'spam')) await _refresh();
+      if (mounted) _notice(friendlyMailError(e));
+    }
+  }
+
+  Future<void> _showMailActions(MailItem message) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Padding(padding: const EdgeInsets.fromLTRB(22, 4, 22, 10), child: Align(alignment: Alignment.centerLeft, child: Text(message.subject, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)))),
+        Wrap(spacing: 8, runSpacing: 8, children: [
+          _sheetAction(ctx, Icons.delete_outline, 'Delete', 'delete'),
+          _sheetAction(ctx, Icons.check_box_outlined, 'Select', 'select'),
+        ]),
+        ListTile(leading: const Icon(Icons.mark_email_read_outlined), title: Text(message.unread ? 'Mark as read' : 'Mark as unread'), onTap: () => Navigator.pop(ctx, message.unread ? 'read' : 'unread')),
+        ListTile(leading: const Icon(Icons.star_outline), title: Text(message.starred ? 'Remove star' : 'Add star'), onTap: () => Navigator.pop(ctx, 'star')),
+        ListTile(leading: const Icon(Icons.archive_outlined), title: const Text('Archive'), onTap: () => Navigator.pop(ctx, 'archive')),
+        if (_folders.any((folder) => folder.path != message.mailboxPath && !_isSystemFolder(folder)))
+          ListTile(leading: const Icon(Icons.drive_file_move_outline), title: const Text('Move to folder'), onTap: () => Navigator.pop(ctx, 'move')),
+        ListTile(leading: const Icon(Icons.report_gmailerrorred_outlined), title: const Text('Mark as spam'), onTap: () => Navigator.pop(ctx, 'spam')),
+        ListTile(leading: const Icon(Icons.person_remove_outlined), title: Text('Delete all from ${message.sender}'), onTap: () => Navigator.pop(ctx, 'sender')),
+      ])),
+    );
+    if (action == 'select') {
+      setState(() => _selectedMessageIds.add(message.identity));
+    } else if (action == 'sender') {
+      final sameSender = message.senderAddress.trim().isEmpty
+          ? <MailItem>[message]
+          : _messages.where((m) => m.senderAddress.toLowerCase() == message.senderAddress.toLowerCase()).toList();
+      try {
+        await _service.deleteMessages(_accounts[_active], sameSender);
+        if (mounted) setState(() { _messages.removeWhere((m) => sameSender.any((item) => item.identity == m.identity)); _selectedMessageIds.removeAll(sameSender.map((m) => m.identity)); });
+      } catch (e) { if (mounted) _notice(friendlyMailError(e)); }
+    } else if (action == 'move') {
+      final targets = _folders.where((folder) => folder.path != message.mailboxPath).toList();
+      final target = await showModalBottomSheet<MailFolder>(context: context, showDragHandle: true, builder: (ctx) => SafeArea(child: ListView(shrinkWrap: true, children: [for (final folder in targets) ListTile(leading: Icon(_folderIcon(folder)), title: Text(_folderTitle(folder)), onTap: () => Navigator.pop(ctx, folder))])));
+      if (target != null) {
+        try { await _service.moveMessage(_accounts[_active], message, target.path); if (mounted) setState(() => _messages.removeWhere((m) => m.identity == message.identity)); }
+        catch (e) { if (mounted) _notice(friendlyMailError(e)); }
+      }
+    } else if (action != null) {
+      await _actOnMail(message, action);
+    }
+  }
+
+  bool _isSystemFolder(MailFolder folder) => const {'inbox', 'sent', 'drafts', 'trash', 'spam', 'archive'}.contains(_folderTitle(folder).toLowerCase());
+
+  Widget _sheetAction(BuildContext context, IconData icon, String label, String result) => SizedBox(width: 150, child: FilledButton.tonalIcon(onPressed: () => Navigator.pop(context, result), icon: Icon(icon), label: Text(label)));
+
+  Future<void> _createFolder() async {
+    if (_accounts.isEmpty) return;
+    final controller = TextEditingController();
+    final name = await showDialog<String>(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Create folder'),
+      content: TextField(controller: controller, autofocus: true, decoration: const InputDecoration(labelText: 'Folder name')),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')), FilledButton(onPressed: () => Navigator.pop(ctx, controller.text), child: const Text('Create'))],
+    ));
+    controller.dispose();
+    if (name == null || name.trim().isEmpty) return;
+    try { await _service.createFolder(_accounts[_active], name); await _loadFolders(); }
+    catch (e) { if (mounted) _notice(friendlyMailError(e)); }
+  }
+
+  Future<void> _bulkDelete() async {
+    final selected = _messages.where((m) => _selectedMessageIds.contains(m.identity)).toList();
+    if (selected.isEmpty || _accounts.isEmpty) return;
+    try {
+      await _service.deleteMessages(_accounts[_active], selected);
+      if (mounted) setState(() { _messages.removeWhere((m) => _selectedMessageIds.contains(m.identity)); _selectedMessageIds.clear(); });
+    } catch (e) { if (mounted) _notice(friendlyMailError(e)); }
+  }
+
+  Future<String?> _askBackupPassphrase({required bool confirm}) async {
+    final controller = TextEditingController();
+    final repeat = TextEditingController();
+    final result = await showDialog<String>(context: context, builder: (ctx) => AlertDialog(
+      title: Text(confirm ? 'Protect backup' : 'Unlock backup'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        const Text('This passphrase encrypts mailbox passwords and saved mail. You will need it to restore the file.'),
+        const SizedBox(height: 14),
+        TextField(controller: controller, obscureText: true, decoration: const InputDecoration(labelText: 'Backup passphrase')),
+        if (confirm) ...[const SizedBox(height: 10), TextField(controller: repeat, obscureText: true, decoration: const InputDecoration(labelText: 'Confirm passphrase'))],
+      ]),
+      actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')), FilledButton(onPressed: () {
+        if (controller.text.length < 10 || (confirm && repeat.text != controller.text)) return;
+        Navigator.pop(ctx, controller.text);
+      }, child: Text(confirm ? 'Encrypt' : 'Unlock'))],
+    ));
+    controller.dispose();
+    repeat.dispose();
+    return result;
+  }
+
+  Future<void> _exportBackup() async {
+    if (_accounts.isEmpty) { _notice('Connect an account before creating a backup.'); return; }
+    final passphrase = await _askBackupPassphrase(confirm: true);
+    if (passphrase == null) return;
+    try {
+      final caches = <String, Object?>{};
+      for (final account in _accounts) {
+        final folders = <String, Object?>{};
+        for (final folder in _folders) {
+          final raw = await _vault.readMailCache(account.id, folder.path);
+          if (raw != null) folders[folder.path] = jsonDecode(raw);
+        }
+        final activeRaw = await _vault.readMailCache(account.id, _folderPath);
+        if (activeRaw != null) folders[_folderPath] = jsonDecode(activeRaw);
+        caches[account.id] = folders;
+      }
+      final bytes = await EncryptedMailBackup.encrypt({
+        'accounts': _accounts.map((account) => account.toJson()).toList(),
+        'mailCache': caches,
+        'createdAt': DateTime.now().toUtc().toIso8601String(),
+      }, passphrase);
+      final path = await FilePicker.saveFile(
+        fileName: 'Parmtech-Mail-Backup.ptmail',
+        bytes: bytes,
+        type: FileType.custom,
+        allowedExtensions: const ['ptmail'],
+      );
+      if (path != null && mounted) _notice('Encrypted backup saved. Keep the passphrase safe.');
+    } catch (e) { if (mounted) _notice('Backup could not be created: ${friendlyMailError(e)}'); }
+  }
+
+  Future<void> _importBackup() async {
+    final selectedFile = await FilePicker.pickFile(type: FileType.custom, allowedExtensions: const ['ptmail']);
+    if (selectedFile == null) return;
+    final passphrase = await _askBackupPassphrase(confirm: false);
+    if (passphrase == null) return;
+    try {
+      final payload = await EncryptedMailBackup.decrypt(await selectedFile.readAsBytes(), passphrase);
+      final incoming = (payload['accounts'] as List<dynamic>)
+          .map((entry) => MailAccount.fromJson(entry as Map<String, dynamic>)).toList();
+      final byId = <String, MailAccount>{for (final item in _accounts) item.id: item, for (final item in incoming) item.id: item};
+      if (byId.length > SecureAccountVault.maxAccounts) throw const AccountLimitReachedException();
+      await _vault.replaceAll(byId.values.toList());
+      final caches = payload['mailCache'];
+      if (caches is Map<String, dynamic>) {
+        for (final entry in caches.entries) {
+          final folders = entry.value;
+          if (folders is! Map<String, dynamic>) continue;
+          for (final folder in folders.entries) {
+            await _vault.writeMailCache(entry.key, folder.key, jsonEncode(folder.value));
+          }
+        }
+      }
+      if (!mounted) return;
+      setState(() { _accounts = byId.values.toList(); _active = 0; _folderPath = 'INBOX'; _messages = []; _folders = const []; });
+      await _loadFolders();
+      await _refresh();
+      if (mounted) _notice('Backup restored on this device.');
+    } catch (e) { if (mounted) _notice('Could not restore backup. Check the file and passphrase. ${friendlyMailError(e)}'); }
   }
 
   void _notice(String text) => ScaffoldMessenger.of(context).showSnackBar(
@@ -552,8 +781,12 @@ class _MailHomeState extends State<MailHome>
                   )
                 : const Icon(Icons.sync_rounded),
           ),
+          if (account != null && _selectedMessageIds.isNotEmpty) ...[
+            IconButton(onPressed: _bulkDelete, tooltip: 'Delete selected', icon: const Icon(Icons.delete_outline_rounded)),
+            IconButton(onPressed: () => setState(() => _selectedMessageIds.clear()), tooltip: 'Clear selection', icon: const Icon(Icons.close_rounded)),
+          ],
           IconButton(
-            onPressed: () => setState(() => _searchOpen = !_searchOpen),
+            onPressed: account == null ? _addAccount : () => setState(() => _searchOpen = !_searchOpen),
             tooltip: 'Search',
             icon: Icon(
               _searchOpen ? Icons.close_rounded : Icons.search_rounded,
@@ -610,7 +843,7 @@ class _MailHomeState extends State<MailHome>
                 );
               },
             ),
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton: account == null ? null : FloatingActionButton.extended(
         onPressed: _compose,
         backgroundColor: _orange,
         foregroundColor: Colors.black,
@@ -1144,17 +1377,31 @@ class _MailHomeState extends State<MailHome>
     bool selected = false,
     bool compact = false,
     VoidCallback? onTap,
-  }) =>
-      Material(
+  }) {
+    final selectedForAction = _selectedMessageIds.contains(mail.identity);
+    final tile = Material(
         color: compact
             ? Colors.transparent
-            : selected
+            : selected || selectedForAction
             ? _orange.withValues(alpha: .13)
             : _panel,
         borderRadius: BorderRadius.circular(20),
         child: InkWell(
           borderRadius: BorderRadius.circular(20),
-          onTap: onTap ?? () => _open(mail),
+          onTap: () {
+            if (_selectedMessageIds.isNotEmpty) {
+              setState(() {
+                if (!_selectedMessageIds.add(mail.identity)) {
+                  _selectedMessageIds.remove(mail.identity);
+                }
+              });
+            } else if (onTap != null) {
+              onTap();
+            } else {
+              _open(mail);
+            }
+          },
+          onLongPress: () => _showMailActions(mail),
           child: Semantics(
             button: true,
             label: 'Email from ${mail.sender}. ${mail.subject}. ${mail.time}',
@@ -1230,7 +1477,11 @@ class _MailHomeState extends State<MailHome>
                   ),
                 ),
                 const SizedBox(width: 8),
-                if (mail.unread)
+                if (selectedForAction)
+                  const Icon(Icons.check_circle_rounded, color: _orange)
+                else if (mail.starred)
+                  const Icon(Icons.star_rounded, color: Color(0xFFFFC857), size: 18)
+                else if (mail.unread)
                   const Padding(
                     padding: EdgeInsets.only(top: 6),
                     child: Icon(Icons.circle, size: 9, color: _orange),
@@ -1241,6 +1492,29 @@ class _MailHomeState extends State<MailHome>
           ),
         ),
       );
+    if (!compact || _accounts.isEmpty) return tile;
+    return Dismissible(
+      key: ValueKey(mail.identity),
+      direction: DismissDirection.horizontal,
+      background: Container(
+        alignment: Alignment.centerLeft,
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        color: const Color(0xFF168A73),
+        child: const Icon(Icons.mark_email_read_rounded, color: Colors.white),
+      ),
+      secondaryBackground: Container(
+        alignment: Alignment.centerRight,
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        color: const Color(0xFFE64E55),
+        child: const Icon(Icons.delete_outline_rounded, color: Colors.white),
+      ),
+      confirmDismiss: (direction) async {
+        await _actOnMail(mail, direction == DismissDirection.startToEnd ? 'read' : 'delete');
+        return false;
+      },
+      child: tile,
+    );
+  }
 
   Widget _welcome() => Center(
     child: SingleChildScrollView(
@@ -1397,6 +1671,12 @@ class _MailHomeState extends State<MailHome>
                 _selectFolder(folder);
               },
             ),
+          if (_accounts.isNotEmpty)
+            ListTile(
+              leading: const Icon(Icons.create_new_folder_outlined),
+              title: const Text('Create folder'),
+              onTap: () { Navigator.pop(context); _createFolder(); },
+            ),
           const Divider(),
           for (final a in _accounts)
             ListTile(
@@ -1462,6 +1742,9 @@ class _MailHomeState extends State<MailHome>
               }
             },
           ),
+          const Divider(),
+          ListTile(leading: const Icon(Icons.lock_outline), title: const Text('Export encrypted backup'), onTap: () { Navigator.pop(context); _exportBackup(); }),
+          ListTile(leading: const Icon(Icons.settings_backup_restore_outlined), title: const Text('Import backup'), onTap: () { Navigator.pop(context); _importBackup(); }),
           const Spacer(),
           const Padding(
             padding: EdgeInsets.all(22),
@@ -1617,13 +1900,29 @@ class AddAccountPage extends StatefulWidget {
 }
 
 class MailDetailPage extends StatelessWidget {
-  const MailDetailPage({super.key, required this.message});
+  const MailDetailPage({super.key, required this.message, this.account, this.service, this.folders = const [], this.onAction});
 
   final MailItem message;
+  final MailAccount? account;
+  final CpanelMailService? service;
+  final List<MailFolder> folders;
+  final Future<void> Function(String action)? onAction;
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('Message')),
+    appBar: AppBar(
+      title: const Text('Message'),
+      actions: [PopupMenuButton<String>(onSelected: (action) async {
+        if (action == 'move') {
+          final target = await showModalBottomSheet<MailFolder>(context: context, showDragHandle: true, builder: (ctx) => SafeArea(child: ListView(shrinkWrap: true, children: [for (final folder in folders.where((f) => f.path != message.mailboxPath)) ListTile(leading: const Icon(Icons.folder_outlined), title: Text(folder.name), onTap: () => Navigator.pop(ctx, folder))])));
+          if (target != null && account != null && service != null) await service!.moveMessage(account!, message, target.path);
+          if (target != null && context.mounted) Navigator.pop(context);
+        } else {
+          await onAction?.call(action);
+          if (action == 'delete' && context.mounted) Navigator.pop(context);
+        }
+      }, itemBuilder: (_) => const [PopupMenuItem(value: 'read', child: Text('Mark unread')), PopupMenuItem(value: 'star', child: Text('Toggle star')), PopupMenuItem(value: 'archive', child: Text('Archive')), PopupMenuItem(value: 'spam', child: Text('Mark as spam')), PopupMenuItem(value: 'move', child: Text('Move to folder')), PopupMenuItem(value: 'delete', child: Text('Delete'))])],
+    ),
     body: SafeArea(
       child: ListView(
         padding: const EdgeInsets.fromLTRB(22, 8, 22, 32),
@@ -1687,10 +1986,36 @@ class MailDetailPage extends StatelessWidget {
                 : message.body,
             style: const TextStyle(height: 1.6, fontSize: 15),
           ),
+          const SizedBox(height: 24),
+          Wrap(spacing: 10, runSpacing: 10, children: [
+            FilledButton.icon(onPressed: account == null || service == null ? null : () => _compose(context, account!, service!, to: message.senderAddress, subject: message.subject.toLowerCase().startsWith('re:') ? message.subject : 'Re: ${message.subject}', body: '\n\nOn ${message.time}, ${message.sender} wrote:\n> ${message.body.replaceAll('\n', '\n> ')}'), icon: const Icon(Icons.reply_rounded), label: const Text('Reply')),
+            OutlinedButton.icon(onPressed: account == null || service == null ? null : () => _compose(context, account!, service!, subject: 'Fwd: ${message.subject}', body: '\n\n---------- Forwarded message ----------\nFrom: ${message.senderAddress}\nDate: ${message.time}\nSubject: ${message.subject}\n\n${message.body}'), icon: const Icon(Icons.forward_rounded), label: const Text('Forward')),
+            OutlinedButton.icon(onPressed: () => _print(context), icon: const Icon(Icons.print_outlined), label: const Text('Print')),
+          ]),
         ],
       ),
     ),
   );
+
+  Future<void> _compose(BuildContext context, MailAccount account, CpanelMailService service, {String to = '', String subject = '', String body = ''}) async {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ComposePage(account: account, service: service, initialTo: to, initialSubject: subject, initialBody: body)));
+  }
+
+  Future<void> _print(BuildContext context) async {
+    try {
+      await Printing.layoutPdf(onLayout: (format) async {
+        final document = pw.Document();
+        document.addPage(pw.MultiPage(pageFormat: format, build: (_) => [
+          pw.Text(message.subject, style: pw.TextStyle(fontSize: 22, fontWeight: pw.FontWeight.bold)),
+          pw.SizedBox(height: 12), pw.Text('From: ${message.sender} <${message.senderAddress}>'),
+          pw.Text('Date: ${message.time}'), pw.Divider(), pw.Text(message.body),
+        ]));
+        return document.save();
+      });
+    } catch (error) {
+      if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not open print dialog: $error')));
+    }
+  }
 }
 
 class _AddAccountPageState extends State<AddAccountPage> {
@@ -1802,17 +2127,20 @@ class _AddAccountPageState extends State<AddAccountPage> {
 }
 
 class ComposePage extends StatefulWidget {
-  const ComposePage({super.key, required this.account, required this.service});
+  const ComposePage({super.key, required this.account, required this.service, this.initialTo = '', this.initialSubject = '', this.initialBody = ''});
   final MailAccount account;
   final CpanelMailService service;
+  final String initialTo;
+  final String initialSubject;
+  final String initialBody;
   @override
   State<ComposePage> createState() => _ComposePageState();
 }
 
 class _ComposePageState extends State<ComposePage> {
-  final _to = TextEditingController();
-  final _subject = TextEditingController();
-  final _body = TextEditingController();
+  late final _to = TextEditingController(text: widget.initialTo);
+  late final _subject = TextEditingController(text: widget.initialSubject);
+  late final _body = TextEditingController(text: widget.initialBody);
   bool _sending = false;
   @override
   void dispose() {

@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parm_mail/data/accounts/mail_account.dart';
+import 'package:parm_mail/data/mail/cpanel_mail_service.dart';
 
 void main() {
   test('ParmTech cPanel hostname is preferred; domain is fallback', () {
@@ -47,6 +48,12 @@ void main() {
     expect(isValidMailServerHost('example.org:993'), isFalse);
     expect(isValidMailServerHost('invalid host.example.org'), isFalse);
     expect(isValidMailServerHost(''), isFalse);
+  });
+
+  test('TLS setup errors are not flattened into generic notifications', () {
+    const message = 'Could not connect to IMAP securely. '
+        'Tried: mail.example.org:993 (TLS certificate or handshake failed).';
+    expect(friendlyMailError(const MailConnectionException(message)), message);
   });
 
   test('mailbox email is normalized for account identity', () {

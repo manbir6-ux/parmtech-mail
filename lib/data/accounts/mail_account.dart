@@ -8,6 +8,7 @@ class MailAccount {
     required this.imapHost,
     required this.smtpHost,
     this.displayName = '',
+    this.useCustomServer = false,
   });
 
   final String email;
@@ -15,6 +16,9 @@ class MailAccount {
   final String imapHost;
   final String smtpHost;
   final String displayName;
+  /// The user entered the server host(s) from their provider's TLS settings.
+  /// Do not override a manually chosen host with unsafe guesses.
+  final bool useCustomServer;
 
   String get id => email.trim().toLowerCase();
 
@@ -24,6 +28,7 @@ class MailAccount {
     'imapHost': imapHost,
     'smtpHost': smtpHost,
     'displayName': displayName,
+    'useCustomServer': useCustomServer,
   };
 
   factory MailAccount.fromJson(Map<String, dynamic> json) => MailAccount(
@@ -32,6 +37,7 @@ class MailAccount {
     imapHost: json['imapHost'] as String,
     smtpHost: json['smtpHost'] as String,
     displayName: (json['displayName'] as String?) ?? '',
+    useCustomServer: (json['useCustomServer'] as bool?) ?? false,
   );
 }
 
@@ -40,8 +46,9 @@ class MailServerCandidate {
   final String host;
 }
 
-/// Uses only server names shown in this account's cPanel settings.
-/// Prefer its hosting-server hostname, then try the domain shown by cPanel.
+/// Provider presets are only host suggestions. A trusted TLS certificate is
+/// required for every connection; no insecure certificate exceptions are used.
+/// cPanel domains can require their hosting server name from Connect Devices.
 List<MailServerCandidate> cPanelHostCandidates(String email) {
   final domain = email.trim().split('@').last.toLowerCase();
   if (domain.isEmpty || !domain.contains('.')) return const [];
@@ -49,12 +56,70 @@ List<MailServerCandidate> cPanelHostCandidates(String email) {
   if (domain == 'parmtech.au') {
     return const [
       MailServerCandidate('premium214.web-hosting.com'),
+      MailServerCandidate('mail.parmtech.au'),
       MailServerCandidate('parmtech.au'),
     ];
   }
-  // Ordinary cPanel setups may use either the root domain or mail.domain.
-  // We never skip TLS certificate validation for either candidate.
-  return [MailServerCandidate(domain), MailServerCandidate('mail.$domain')];
+  if ((domain.startsWith('yahoo.') ||
+      const {'ymail.com', 'rocketmail.com'}.contains(domain))) {
+    return const [MailServerCandidate('imap.mail.yahoo.com')];
+  }
+  if (const {'gmail.com', 'googlemail.com'}.contains(domain)) {
+    return const [MailServerCandidate('imap.gmail.com')];
+  }
+  if (domain == 'aol.com') {
+    return const [MailServerCandidate('imap.aol.com')];
+  }
+  if (const {'icloud.com', 'me.com', 'mac.com'}.contains(domain)) {
+    return const [MailServerCandidate('imap.mail.me.com')];
+  }
+
+  // Prefer mail.domain over the root website hostname, which often has a
+  // web-only TLS certificate. If neither host matches its cert, the account
+  // must use the provider's explicitly documented secure mail hostname.
+  return [
+    MailServerCandidate('mail.$domain'),
+    MailServerCandidate(domain),
+  ];
+}
+
+String recommendedSmtpHost(String email) {
+  final domain = email.trim().split('@').last.toLowerCase();
+  if ((domain.startsWith('yahoo.') ||
+      const {'ymail.com', 'rocketmail.com'}.contains(domain))) {
+    return 'smtp.mail.yahoo.com';
+  }
+  if (const {'gmail.com', 'googlemail.com'}.contains(domain)) {
+    return 'smtp.gmail.com';
+  }
+  if (domain == 'aol.com') return 'smtp.aol.com';
+  if (const {'icloud.com', 'me.com', 'mac.com'}.contains(domain)) {
+    return 'smtp.mail.me.com';
+  }
+  final candidates = cPanelHostCandidates(email);
+  return candidates.isEmpty ? '' : candidates.first.host;
+}
+
+String mailSetupHint(String email) {
+  final domain = email.trim().split('@').last.toLowerCase();
+  if ((domain.startsWith('yahoo.') ||
+      const {'ymail.com', 'rocketmail.com', 'aol.com'}.contains(domain))) {
+    return 'Yahoo/AOL accounts usually need an App Password from the '
+        'provider account-security page.';
+  }
+  if (const {'gmail.com', 'googlemail.com'}.contains(domain)) {
+    return 'Gmail password-only IMAP access requires an eligible App Password. '
+        'Regular Google sign-in/OAuth is not implemented in this client.';
+  }
+  if (const {'icloud.com', 'me.com', 'mac.com'}.contains(domain)) {
+    return 'iCloud Mail requires an app-specific password for this mail client.';
+  }
+  if (const {'outlook.com', 'hotmail.com', 'live.com', 'office365.com'}.contains(domain)) {
+    return 'Microsoft mail accounts normally require OAuth sign-in. '
+        'This app currently supports password-based IMAP only.';
+  }
+  return 'For cPanel mail: Email Accounts → Connect Devices → Secure SSL/TLS '
+      'Settings. Copy the exact incoming and outgoing server names shown there.';
 }
 
 bool isValidMailAddress(String value) {

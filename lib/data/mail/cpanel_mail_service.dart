@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:enough_mail/enough_mail.dart' as mail;
@@ -137,6 +138,7 @@ class CpanelMailService {
             ? session.host
             : account.smtpHost.trim(),
         displayName: account.displayName,
+        useCustomServer: account.useCustomServer,
       );
     } finally {
       await _closeImap(session.client);
@@ -380,8 +382,9 @@ class CpanelMailService {
     }
     final candidates = <String>{
       account.smtpHost.trim(),
-      account.imapHost.trim(),
-      ...model.cPanelHostCandidates(account.email).map((e) => e.host),
+      if (!account.useCustomServer) account.imapHost.trim(),
+      if (!account.useCustomServer)
+        ...model.cPanelHostCandidates(account.email).map((e) => e.host),
     }.where((host) => host.isNotEmpty);
     final connectionErrors = <String>[];
 
@@ -395,7 +398,7 @@ class CpanelMailService {
           timeout: _connectTimeout,
         );
       } catch (error) {
-        connectionErrors.add('$host: $error');
+        connectionErrors.add('$host:465 (${_describeConnectionFailure(error)})');
         try {
           await client.disconnect();
         } catch (_) {}
@@ -478,9 +481,11 @@ class CpanelMailService {
   Future<_ImapSession> _connectAndLogin(model.MailAccount account) async {
     final hosts = <String>{
       account.imapHost.trim(),
-      ...model.cPanelHostCandidates(account.email).map((candidate) => candidate.host),
+      if (!account.useCustomServer)
+        ...model.cPanelHostCandidates(account.email).map((candidate) => candidate.host),
     }.where((host) => host.trim().isNotEmpty);
     final connectionErrors = <String>[];
+    var sawTlsFailure = false;
 
     for (final host in hosts) {
       final client = mail.ImapClient(
@@ -491,7 +496,12 @@ class CpanelMailService {
       try {
         await _connectImap(client, host);
       } catch (error) {
-        connectionErrors.add('$host: $error');
+        final hint = _describeConnectionFailure(error);
+        if (error is HandshakeException || error is TlsException ||
+            hint.contains('certificate')) {
+          sawTlsFailure = true;
+        }
+        connectionErrors.add('$host:993 ($hint)');
         continue;
       }
 
@@ -504,9 +514,41 @@ class CpanelMailService {
       }
     }
 
+    final recommendation = sawTlsFailure
+        ? 'TLS certificate validation failed on at least one host. '
+          'Use the exact Incoming Server from your provider’s Secure SSL/TLS '
+          'mail settings (cPanel → Email Accounts → Connect Devices).'
+        : 'Check the incoming server hostname and network connection. '
+          'Use the exact secure IMAP hostname supplied by your mail provider.';
     throw MailConnectionException(
-      'Could not reach a secure IMAP server. ${connectionErrors.join('; ')}',
+      'Could not connect to IMAP securely. $recommendation '
+      'Tried: ${connectionErrors.join('; ')}.',
     );
+  }
+
+  /// A safe, password-free diagnostic for the account setup screen.
+  static String _describeConnectionFailure(Object error) {
+    if (error is HandshakeException || error is TlsException) {
+      return 'TLS certificate or handshake failed';
+    }
+    if (error is TimeoutException) return 'connection timed out';
+    if (error is SocketException) {
+      final lower = error.message.toLowerCase();
+      if (lower.contains('lookup') || lower.contains('resolve') ||
+          lower.contains('host not found')) {
+        return 'hostname could not be resolved';
+      }
+      return 'connection refused or unreachable';
+    }
+    final lower = error.toString().toLowerCase();
+    if (lower.contains('certificate') || lower.contains('handshake') ||
+        lower.contains('tls')) {
+      return 'TLS certificate or handshake failed';
+    }
+    if (lower.contains('timed out') || lower.contains('timeout')) {
+      return 'connection timed out';
+    }
+    return 'server unavailable';
   }
 
   Future<void> _connectImap(mail.ImapClient client, String host) async {
@@ -628,6 +670,8 @@ class MailConnectionException implements Exception {
 String friendlyMailError(Object error) {
   final text = error.toString().replaceFirst('Exception: ', '').trim();
   final lower = text.toLowerCase();
+
+  if (error is MailConnectionException) return error.message;
 
   if (lower.contains('auth') ||
       lower.contains('login') ||

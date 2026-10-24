@@ -35,10 +35,11 @@ Future<void> main() async {
 }
 
 bool _darkTheme = false;
-Color get _ink => _darkTheme ? const Color(0xFF0F1624) : const Color(0xFFF6F8FC);
-Color get _panel => _darkTheme ? const Color(0xFF192438) : Colors.white;
-const _orange = Color(0xFF4F6FE8);
-const _muted = Color(0xFF8390A3);
+Color get _ink => _darkTheme ? const Color(0xFF0C1323) : const Color(0xFFF4F6FB);
+Color get _panel => _darkTheme ? const Color(0xFF182238) : Colors.white;
+const _orange = Color(0xFF5066E9);
+const _sky = Color(0xFF08A7C7);
+const _muted = Color(0xFF78869B);
 
 class ParmMailApp extends StatefulWidget {
   const ParmMailApp({super.key});
@@ -67,6 +68,13 @@ class _ParmMailAppState extends State<ParmMailApp> {
         surface: _panel,
       ),
       appBarTheme: AppBarTheme(backgroundColor: _ink, elevation: 0),
+      textTheme: const TextTheme(
+        headlineLarge: TextStyle(fontWeight: FontWeight.w900, letterSpacing: -1.2),
+        headlineSmall: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -.6),
+        titleLarge: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -.4),
+        titleMedium: TextStyle(fontWeight: FontWeight.w700, letterSpacing: -.25),
+        bodyMedium: TextStyle(fontSize: 14, height: 1.35),
+      ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: _panel,
@@ -86,6 +94,13 @@ class _ParmMailAppState extends State<ParmMailApp> {
         surface: _panel,
       ),
       appBarTheme: AppBarTheme(backgroundColor: _ink, elevation: 0),
+      textTheme: const TextTheme(
+        headlineLarge: TextStyle(fontWeight: FontWeight.w900, letterSpacing: -1.2),
+        headlineSmall: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -.6),
+        titleLarge: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -.4),
+        titleMedium: TextStyle(fontWeight: FontWeight.w700, letterSpacing: -.25),
+        bodyMedium: TextStyle(fontSize: 14, height: 1.35),
+      ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: _panel,

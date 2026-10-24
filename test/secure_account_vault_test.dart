@@ -53,6 +53,33 @@ void main() {
     expect(await vault.readMailCaches(_second.id), {'Archive': '[2]'});
   });
 
+  test('similar account names never share cached folders', () async {
+    const shortDomain = MailAccount(
+      email: 'info@example.com',
+      password: 'short-secret',
+      imapHost: 'example.com',
+      smtpHost: 'example.com',
+    );
+    const longDomain = MailAccount(
+      email: 'info@example.com.au',
+      password: 'long-secret',
+      imapHost: 'example.com.au',
+      smtpHost: 'example.com.au',
+    );
+    final vault = SecureAccountVault();
+    await vault.add(shortDomain);
+    await vault.add(longDomain);
+    await vault.writeMailCache(shortDomain.id, 'INBOX', '[1]');
+    await vault.writeMailCache(longDomain.id, 'INBOX', '[2]');
+
+    expect(await vault.readMailCaches(shortDomain.id), {'INBOX': '[1]'});
+    expect(await vault.readMailCaches(longDomain.id), {'INBOX': '[2]'});
+
+    await vault.remove(shortDomain.email);
+    expect(await vault.readMailCache(shortDomain.id, 'INBOX'), isNull);
+    expect(await vault.readMailCache(longDomain.id, 'INBOX'), '[2]');
+  });
+
   test('clear removes all ParmTech Mail data but preserves unrelated keys', () async {
     const storage = FlutterSecureStorage();
     final vault = SecureAccountVault(storage: storage);

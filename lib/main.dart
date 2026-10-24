@@ -526,6 +526,7 @@ class _MailHomeState extends State<MailHome>
   }
 
   Future<void> _open(MailItem message) async {
+    if (message.unread) unawaited(_actOnMail(message, 'read'));
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => MailDetailPage(
@@ -534,6 +535,11 @@ class _MailHomeState extends State<MailHome>
           service: _service,
           folders: _folders,
           onAction: (action) => _actOnMail(message, action),
+          onMove: (folder) async {
+            await _service.moveMessage(_accounts[_active], message, folder.path);
+            if (mounted) setState(() => _messages.removeWhere((m) => m.identity == message.identity));
+          },
+          onSent: _refresh,
         ),
       ),
     );
@@ -785,8 +791,8 @@ class _MailHomeState extends State<MailHome>
             IconButton(onPressed: _bulkDelete, tooltip: 'Delete selected', icon: const Icon(Icons.delete_outline_rounded)),
             IconButton(onPressed: () => setState(() => _selectedMessageIds.clear()), tooltip: 'Clear selection', icon: const Icon(Icons.close_rounded)),
           ],
-          IconButton(
-            onPressed: account == null ? _addAccount : () => setState(() => _searchOpen = !_searchOpen),
+          if (account != null) IconButton(
+            onPressed: () => setState(() => _searchOpen = !_searchOpen),
             tooltip: 'Search',
             icon: Icon(
               _searchOpen ? Icons.close_rounded : Icons.search_rounded,
@@ -1900,13 +1906,15 @@ class AddAccountPage extends StatefulWidget {
 }
 
 class MailDetailPage extends StatelessWidget {
-  const MailDetailPage({super.key, required this.message, this.account, this.service, this.folders = const [], this.onAction});
+  const MailDetailPage({super.key, required this.message, this.account, this.service, this.folders = const [], this.onAction, this.onMove, this.onSent});
 
   final MailItem message;
   final MailAccount? account;
   final CpanelMailService? service;
   final List<MailFolder> folders;
   final Future<void> Function(String action)? onAction;
+  final Future<void> Function(MailFolder folder)? onMove;
+  final Future<void> Function()? onSent;
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -1915,13 +1923,19 @@ class MailDetailPage extends StatelessWidget {
       actions: [PopupMenuButton<String>(onSelected: (action) async {
         if (action == 'move') {
           final target = await showModalBottomSheet<MailFolder>(context: context, showDragHandle: true, builder: (ctx) => SafeArea(child: ListView(shrinkWrap: true, children: [for (final folder in folders.where((f) => f.path != message.mailboxPath)) ListTile(leading: const Icon(Icons.folder_outlined), title: Text(folder.name), onTap: () => Navigator.pop(ctx, folder))])));
-          if (target != null && account != null && service != null) await service!.moveMessage(account!, message, target.path);
+          if (target != null && onMove != null) {
+            try { await onMove!(target); }
+            catch (error) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not move message: $error'))); return; }
+          } else if (target != null && account != null && service != null) {
+            try { await service!.moveMessage(account!, message, target.path); }
+            catch (error) { if (context.mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not move message: $error'))); return; }
+          }
           if (target != null && context.mounted) Navigator.pop(context);
         } else {
           await onAction?.call(action);
           if (action == 'delete' && context.mounted) Navigator.pop(context);
         }
-      }, itemBuilder: (_) => const [PopupMenuItem(value: 'read', child: Text('Mark unread')), PopupMenuItem(value: 'star', child: Text('Toggle star')), PopupMenuItem(value: 'archive', child: Text('Archive')), PopupMenuItem(value: 'spam', child: Text('Mark as spam')), PopupMenuItem(value: 'move', child: Text('Move to folder')), PopupMenuItem(value: 'delete', child: Text('Delete'))])],
+      }, itemBuilder: (_) => [PopupMenuItem(value: message.unread ? 'read' : 'unread', child: Text(message.unread ? 'Mark as read' : 'Mark as unread')), PopupMenuItem(value: 'star', child: Text(message.starred ? 'Remove star' : 'Add star')), const PopupMenuItem(value: 'archive', child: Text('Archive')), const PopupMenuItem(value: 'spam', child: Text('Mark as spam')), const PopupMenuItem(value: 'move', child: Text('Move to folder')), const PopupMenuItem(value: 'delete', child: Text('Delete'))])],
     ),
     body: SafeArea(
       child: ListView(
@@ -1998,7 +2012,8 @@ class MailDetailPage extends StatelessWidget {
   );
 
   Future<void> _compose(BuildContext context, MailAccount account, CpanelMailService service, {String to = '', String subject = '', String body = ''}) async {
-    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ComposePage(account: account, service: service, initialTo: to, initialSubject: subject, initialBody: body)));
+    final sent = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => ComposePage(account: account, service: service, initialTo: to, initialSubject: subject, initialBody: body)));
+    if (sent == true) await onSent?.call();
   }
 
   Future<void> _print(BuildContext context) async {

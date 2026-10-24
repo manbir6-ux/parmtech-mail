@@ -270,11 +270,16 @@ class CpanelMailService {
         } else {
           for (final item in entry.value) {
             final uid = item.uid!;
-            await session.client.uidMarkDeleted(
-              mail.MessageSequence.fromRange(uid, uid, isUidSequence: true),
+            final sequence = mail.MessageSequence.fromRange(
+              uid,
+              uid,
+              isUidSequence: true,
             );
+            await session.client.uidMarkDeleted(
+              sequence,
+            );
+            await session.client.uidExpunge(sequence);
           }
-          await session.client.uidExpunge();
         }
       }
     } finally {

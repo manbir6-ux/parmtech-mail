@@ -2344,21 +2344,26 @@ class _ComposePageState extends State<ComposePage> {
   Future<void> _pickAttachments() async {
     setState(() => _pickingFiles = true);
     try {
-      final selected = await FilePicker.pickFiles(
-        allowMultiple: true,
-        type: FileType.any,
-        withData: true,
-      );
-      if (selected == null || !mounted) return;
+      final selected = await FilePicker.pickFiles(type: FileType.any);
+      if (selected.isEmpty || !mounted) return;
       final additions = <OutgoingMailAttachment>[];
       var total = _attachments.fold<int>(
         0,
         (bytes, attachment) => bytes + attachment.bytes.length,
       );
-      for (final file in selected.files) {
-        final data = file.bytes ??
-            (file.path == null ? null : await File(file.path!).readAsBytes());
-        if (data == null || data.isEmpty) continue;
+      for (final file in selected) {
+        final reportedLength = file.lengthSync() ?? await file.length();
+        if (reportedLength != null &&
+            total + reportedLength > 20 * 1024 * 1024) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('20 MB total attachment limit reached.'),
+            ));
+          }
+          break;
+        }
+        final data = await file.readAsBytes();
+        if (data.isEmpty) continue;
         if (total + data.length > 20 * 1024 * 1024) {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(

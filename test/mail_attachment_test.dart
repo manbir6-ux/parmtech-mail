@@ -7,8 +7,8 @@ import 'package:parm_mail/data/mail/cpanel_mail_service.dart';
 void main() {
   test('attachment MIME builder supports filename, binary data and message body', () {
     final builder = mail.MessageBuilder.prepareMultipartMixedMessage()
-      ..from = [mail.MailAddress('', 'sender@example.com')]
-      ..to = [mail.MailAddress('', 'recipient@example.com')]
+      ..from = [const mail.MailAddress('', 'sender@example.com')]
+      ..to = [const mail.MailAddress('', 'recipient@example.com')]
       ..subject = 'Attachment example'
       ..addMultipartAlternative(plainText: 'Hello', htmlText: '<p>Hello</p>');
 

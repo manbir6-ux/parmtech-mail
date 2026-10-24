@@ -311,7 +311,8 @@ class _MailHomeState extends State<MailHome>
     if (_messages.isEmpty) {
       try {
         final cached = await _vault.readMailCache(account.id, folderPath);
-        if (cached != null && mounted && _accounts[_active].id == account.id) {
+        if (cached != null && mounted && _accounts.isNotEmpty &&
+            _accounts[_active].id == account.id && _folderPath == folderPath) {
           final records = jsonDecode(cached) as List<dynamic>;
           setState(() => _messages = records
               .map((entry) => MailItem.fromJson(entry as Map<String, dynamic>))
@@ -349,9 +350,8 @@ class _MailHomeState extends State<MailHome>
           _folderPath == folderPath) {
         setState(() {
           _messages = items;
-          if (_selectedMail == null || !items.contains(_selectedMail)) {
-            _selectedMail = items.isEmpty ? null : items.first;
-          }
+          _selectedMail = items.where((m) => m.identity == _selectedMail?.identity).firstOrNull ??
+                    (items.isEmpty ? null : items.first);
         });
       }
       await _vault.writeUnreadCounts(_lastUnreadByEmail);
@@ -398,9 +398,8 @@ class _MailHomeState extends State<MailHome>
               _folderPath.toUpperCase() == 'INBOX') {
             setState(() {
               _messages = items;
-              if (_selectedMail == null || !items.contains(_selectedMail)) {
-                _selectedMail = items.isEmpty ? null : items.first;
-              }
+              _selectedMail = items.where((m) => m.identity == _selectedMail?.identity).firstOrNull ??
+                    (items.isEmpty ? null : items.first);
             });
           }
         } catch (_) {
@@ -692,14 +691,10 @@ class _MailHomeState extends State<MailHome>
     try {
       final caches = <String, Object?>{};
       for (final account in _accounts) {
-        final folders = <String, Object?>{};
-        for (final folder in _folders) {
-          final raw = await _vault.readMailCache(account.id, folder.path);
-          if (raw != null) folders[folder.path] = jsonDecode(raw);
-        }
-        final activeRaw = await _vault.readMailCache(account.id, _folderPath);
-        if (activeRaw != null) folders[_folderPath] = jsonDecode(activeRaw);
-        caches[account.id] = folders;
+        final stored = await _vault.readMailCaches(account.id);
+        caches[account.id] = {
+          for (final entry in stored.entries) entry.key: jsonDecode(entry.value),
+        };
       }
       final bytes = await EncryptedMailBackup.encrypt({
         'accounts': _accounts.map((account) => account.toJson()).toList(),
@@ -731,9 +726,14 @@ class _MailHomeState extends State<MailHome>
       final caches = payload['mailCache'];
       if (caches is Map<String, dynamic>) {
         for (final entry in caches.entries) {
+          // Never import unrelated caches from a malformed backup.
+          if (!byId.containsKey(entry.key)) continue;
           final folders = entry.value;
           if (folders is! Map<String, dynamic>) continue;
           for (final folder in folders.entries) {
+            if (folder.key.isEmpty || folder.key.length > 512 || folder.value is! List) {
+              continue;
+            }
             await _vault.writeMailCache(entry.key, folder.key, jsonEncode(folder.value));
           }
         }

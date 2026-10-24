@@ -2239,6 +2239,8 @@ class _ComposePageState extends State<ComposePage> {
   late final _to = TextEditingController(text: widget.initialTo);
   late final _subject = TextEditingController(text: widget.initialSubject);
   late final _body = TextEditingController(text: widget.initialBody);
+  final List<OutgoingMailAttachment> _attachments = [];
+  bool _pickingFiles = false;
   bool _sending = false;
   @override
   void dispose() {
@@ -2289,9 +2291,77 @@ class _ComposePageState extends State<ComposePage> {
           maxLines: 24,
           decoration: const InputDecoration(hintText: 'Write your message…'),
         ),
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: _pickingFiles || _sending ? null : _pickAttachments,
+            icon: const Icon(Icons.attach_file_rounded),
+            label: Text(_pickingFiles ? 'Opening files…' : 'Attach files'),
+          ),
+        ),
+        if (_attachments.isNotEmpty)
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final attachment in _attachments)
+                InputChip(
+                  label: Text(attachment.name),
+                  onDeleted: _sending
+                      ? null
+                      : () => setState(() => _attachments.remove(attachment)),
+                ),
+            ],
+          ),
+        const SizedBox(height: 8),
+        const Text('Attachments: 20 MB total maximum',
+            style: TextStyle(color: _muted, fontSize: 11)),
       ],
     ),
   );
+
+  Future<void> _pickAttachments() async {
+    setState(() => _pickingFiles = true);
+    try {
+      final selected = await FilePicker.pickFiles(
+        allowMultiple: true,
+        type: FileType.any,
+        withData: true,
+      );
+      if (selected == null || !mounted) return;
+      final additions = <OutgoingMailAttachment>[];
+      var total = _attachments.fold<int>(
+        0,
+        (bytes, attachment) => bytes + attachment.bytes.length,
+      );
+      for (final file in selected.files) {
+        final data = file.bytes ??
+            (file.path == null ? null : await File(file.path!).readAsBytes());
+        if (data == null || data.isEmpty) continue;
+        if (total + data.length > 20 * 1024 * 1024) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('20 MB total attachment limit reached.')),
+            );
+          }
+          break;
+        }
+        total += data.length;
+        additions.add(OutgoingMailAttachment(name: file.name, bytes: data));
+      }
+      if (mounted) setState(() => _attachments.addAll(additions));
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not attach file: ${friendlyMailError(error)}')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _pickingFiles = false);
+    }
+  }
+
   Future<void> _send() async {
     if (!isValidMailAddress(_to.text)) {
       ScaffoldMessenger.of(
@@ -2306,6 +2376,7 @@ class _ComposePageState extends State<ComposePage> {
         to: _to.text.trim(),
         subject: _subject.text.trim(),
         body: _body.text,
+        attachments: List<OutgoingMailAttachment>.of(_attachments),
       );
       if (mounted) Navigator.pop(context, true);
     } catch (e) {

@@ -115,6 +115,19 @@ class _ParmMailAppState extends State<ParmMailApp> {
   );
 }
 
+class _DesktopSectionLabel extends StatelessWidget {
+  const _DesktopSectionLabel(this.value);
+  final String value;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(14, 11, 14, 7),
+    child: Text(value, style: TextStyle(
+      color: Theme.of(context).colorScheme.onSurfaceVariant,
+      fontSize: 10, fontWeight: FontWeight.w900,
+      letterSpacing: 1.35)),
+  );
+}
+
 class MailHome extends StatefulWidget {
   const MailHome({
     super.key,
@@ -970,322 +983,304 @@ class _MailHomeState extends State<MailHome>
   }
 
   Widget _desktopLayout(MailAccount? account) {
+    final colors = Theme.of(context).colorScheme;
     final query = _search.text.trim().toLowerCase();
-    final visibleMessages = query.isEmpty
+    final visible = query.isEmpty
         ? _messages
-        : _messages
-              .where(
-                (message) =>
-                    '${message.sender} ${message.subject} ${message.body}'
-                        .toLowerCase()
-                        .contains(query),
-              )
-              .toList();
-    final selected =
-        _selectedMail != null && visibleMessages.contains(_selectedMail)
-        ? _selectedMail
-        : (visibleMessages.isEmpty ? null : visibleMessages.first);
+        : _messages.where((mail) =>
+            '${mail.sender} ${mail.subject} ${mail.body}'
+                .toLowerCase().contains(query)).toList();
+    final conversations = groupMailConversations(visible);
+    final preferred = _selectedMail?.identity;
+    final selected = conversations
+            .where((item) => item.latest.identity == preferred)
+            .map((item) => item.latest)
+            .firstOrNull ??
+        conversations.firstOrNull?.latest;
 
-    return Row(
-      children: [
-        Container(
-          width: 232,
-          decoration: BoxDecoration(
-            color: _darkTheme
-                ? const Color(0xFF141D1F)
-                : const Color(0xFFEAF1EF),
-            border: Border(
-              right: BorderSide(
-                color: _darkTheme ? Colors.white10 : Colors.black12,
-              ),
-            ),
-          ),
-          child: SafeArea(
-            top: false,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(18, 22, 18, 18),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 38,
-                        height: 38,
-                        decoration: BoxDecoration(
-                          color: _orange,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Icon(
-                          Icons.mark_email_unread_rounded,
-                          color: Colors.white,
-                        ),
-                      ),
-                      const SizedBox(width: 11),
-                      const Expanded(
-                        child: Text(
-                          'Parmtech Mail',
-                          style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                  child: FilledButton.icon(
-                    onPressed: _compose,
-                    icon: const Icon(Icons.edit_rounded, size: 18),
-                    label: const Text('Compose'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: _orange,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 15),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                _desktopNavTile(
-                  Icons.inbox_rounded,
-                  'Inbox',
-                  _folderPath.toUpperCase() == 'INBOX',
-                  () {
-                    setState(() {
-                      _folderPath = 'INBOX';
-                      _messages = [];
-                      _selectedMail = null;
-                      _selectedMessageIds.clear();
-                    });
-                    _refresh();
-                  },
-                ),
-                for (final folder
-                    in _folders
-                        .where((folder) => folder.path.toUpperCase() != 'INBOX')
-                        .take(8))
-                  _desktopNavTile(
-                    _folderIcon(folder),
-                    _folderTitle(folder),
-                    folder.path == _folderPath,
-                    () => _selectFolder(folder),
-                    trailing: folder.unread > 0 ? '${folder.unread}' : null,
-                  ),
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(20, 18, 20, 8),
-                  child: Text(
-                    'ACCOUNTS',
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.4,
-                      color: _muted,
-                    ),
-                  ),
-                ),
-                for (final mailbox in _accounts)
-                  ListTile(
-                    dense: true,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 18),
-                    leading: CircleAvatar(
-                      radius: 14,
-                      backgroundColor: _orange.withValues(alpha: .16),
-                      child: Text(
-                        mailbox.email[0].toUpperCase(),
-                        style: const TextStyle(
-                          color: _orange,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                    ),
-                    title: Text(
-                      mailbox.email,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                    selected: mailbox.email == account?.email,
-                    onTap: () {
-                      setState(() {
-                        _active = _accounts.indexOf(mailbox);
-                        _folderPath = 'INBOX';
-                        _messages = [];
-                        _selectedMail = null;
-                    _folders = const [];
-                    _selectedMessageIds.clear();
-                      });
-                      _loadFolders().then((_) => _refresh());
-                    },
-                  ),
-                const Spacer(),
-                ListTile(
-                  leading: const Icon(Icons.add_rounded),
-                  title: const Text('Add account'),
-                  onTap: _addAccount,
-                ),
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(20, 0, 20, 18),
-                  child: Text(
-                    'Secure IMAP  ·  Up to 10 accounts',
-                    style: TextStyle(fontSize: 10, color: _muted),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(24, 18, 24, 16),
-                child: Row(
+    return LayoutBuilder(
+      builder: (context, limits) {
+        final narrow = limits.maxWidth < 1360;
+        final sidebarWidth = narrow ? 212.0 : 240.0;
+        final listWidth = narrow ? 330.0 : 390.0;
+        return Row(
+          children: [
+            SizedBox(
+              width: sidebarWidth,
+              child: ColoredBox(
+                color: colors.surface,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(17, 19, 15, 20),
+                      child: Row(children: [
+                        Container(
+                          width: 38,
+                          height: 38,
+                          decoration: BoxDecoration(
+                            color: colors.primary,
+                            borderRadius: BorderRadius.circular(11),
+                          ),
+                          child: Icon(Icons.mark_email_unread_rounded,
+                              color: colors.onPrimary, size: 21),
+                        ),
+                        const SizedBox(width: 11),
+                        const Expanded(
+                          child: Text('ParmTech Mail',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 17,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -.5)),
+                        ),
+                      ]),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      child: FilledButton.icon(
+                        onPressed: _compose,
+                        icon: const Icon(Icons.edit_rounded, size: 17),
+                        label: const Text('New message'),
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16)),
+                      ),
+                    ),
+                    const SizedBox(height: 15),
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                      // A scrollable sidebar is required for 10 accounts and
+                      // many custom folders; the old Column could overflow.
+                      child: ListView(
+                        padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
                         children: [
-                          Text(
-                            _activeFolderName,
-                            style: const TextStyle(
-                              fontSize: 25,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: -.5,
+                          const _DesktopSectionLabel('YOUR MAIL'),
+                          _desktopNavTile(Icons.inbox_rounded, 'Inbox',
+                            _folderPath.toUpperCase() == 'INBOX',
+                            () {
+                              setState(() {
+                                _folderPath = 'INBOX';
+                                _messages = [];
+                                _selectedMail = null;
+                                _selectedMessageIds.clear();
+                              });
+                              unawaited(_refresh());
+                            }),
+                          for (final folder in _folders.where(
+                              (entry) => entry.path.toUpperCase() != 'INBOX'))
+                            _desktopNavTile(
+                              _folderIcon(folder), _folderTitle(folder),
+                              folder.path == _folderPath,
+                              () => _selectFolder(folder),
+                              trailing: folder.unread > 0
+                                  ? '${folder.unread}' : null),
+                          const SizedBox(height: 15),
+                          const _DesktopSectionLabel('ACCOUNTS'),
+                          for (final mailbox in _accounts)
+                            ListTile(
+                              dense: true,
+                              visualDensity: VisualDensity.compact,
+                              leading: CircleAvatar(
+                                radius: 14,
+                                backgroundColor:
+                                    colors.primary.withValues(alpha: .12),
+                                child: Text(mailbox.email[0].toUpperCase(),
+                                  style: TextStyle(color: colors.primary,
+                                    fontSize: 11, fontWeight: FontWeight.w800)),
+                              ),
+                              title: Text(mailbox.email,
+                                maxLines: 1, overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 11.5,
+                                  fontWeight: FontWeight.w600)),
+                              selected: mailbox.id == account?.id,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10)),
+                              onTap: () {
+                                setState(() {
+                                  _active = _accounts.indexOf(mailbox);
+                                  _folderPath = 'INBOX';
+                                  _messages = [];
+                                  _selectedMail = null;
+                                  _folders = const [];
+                                  _selectedMessageIds.clear();
+                                });
+                                unawaited(_loadFolders()
+                                    .then((_) => _refresh()));
+                              },
                             ),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            account?.email ?? '',
-                            style: const TextStyle(fontSize: 12, color: _muted),
-                          ),
                         ],
                       ),
                     ),
-                    SizedBox(
-                      width: 300,
-                      child: TextField(
-                        controller: _search,
-                        onChanged: (_) => setState(() {}),
-                        decoration: const InputDecoration(
-                          hintText: 'Search mail',
-                          prefixIcon: Icon(Icons.search_rounded),
-                          isDense: true,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    IconButton.filledTonal(
-                      onPressed: _syncing ? null : _refresh,
-                      tooltip: 'Check mail now',
-                      icon: _syncing
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.sync_rounded),
+                    Divider(height: 1, color: colors.outlineVariant),
+                    _desktopNavTile(Icons.settings_rounded, 'Settings',
+                        false, () => unawaited(_openSettings())),
+                    _desktopNavTile(Icons.person_add_alt_1_rounded,
+                        'Add account', false, () => unawaited(_addAccount())),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 5, 12, 13),
+                      child: Row(children: [
+                        Icon(Icons.lock_outline_rounded, size: 12,
+                            color: colors.primary),
+                        const SizedBox(width: 6),
+                        const Expanded(child: Text('Secure private mail',
+                          style: TextStyle(fontSize: 10, color: _muted))),
+                      ]),
                     ),
                   ],
                 ),
               ),
-              if (_error != null) _errorCard(),
-              Expanded(
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 390,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          border: Border(
-                            right: BorderSide(
-                              color: _darkTheme
-                                  ? Colors.white10
-                                  : Colors.black12,
+            ),
+            VerticalDivider(width: 1, thickness: 1,
+                color: colors.outlineVariant),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Padding(
+                    padding: EdgeInsets.fromLTRB(narrow ? 16 : 22, 15,
+                        narrow ? 16 : 22, 14),
+                    child: Row(children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(_activeFolderName,
+                              maxLines: 1, overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 25,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -.8)),
+                            const SizedBox(height: 3),
+                            Text(account?.email ?? '',
+                              maxLines: 1, overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontSize: 12,
+                                color: colors.onSurfaceVariant)),
+                          ],
+                        ),
+                      ),
+                      SizedBox(
+                        width: narrow ? 210 : 295,
+                        child: TextField(
+                          controller: _search,
+                          onChanged: (_) => setState(() {}),
+                          decoration: const InputDecoration(
+                            hintText: 'Search mail or people',
+                            prefixIcon: Icon(Icons.search_rounded),
+                            isDense: true),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton.filledTonal(
+                        onPressed: _syncing ? null : _refresh,
+                        tooltip: 'Check mail now',
+                        icon: _syncing
+                            ? const SizedBox(width: 18, height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2))
+                            : const Icon(Icons.sync_rounded),
+                      ),
+                    ]),
+                  ),
+                  if (_error != null) _errorCard(),
+                  Expanded(
+                    child: Row(children: [
+                      SizedBox(
+                        width: listWidth,
+                        child: Column(
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(14, 5, 14, 9),
+                              child: Row(children: [
+                                Text('CONVERSATIONS',
+                                  style: TextStyle(fontSize: 10,
+                                    letterSpacing: 1.25,
+                                    color: colors.primary,
+                                    fontWeight: FontWeight.w900)),
+                                const Spacer(),
+                                Text('${conversations.length}',
+                                  style: TextStyle(fontSize: 11,
+                                    color: colors.onSurfaceVariant,
+                                    fontWeight: FontWeight.w700)),
+                              ]),
                             ),
-                          ),
+                            Expanded(
+                              child: _syncing && _messages.isEmpty
+                                  ? const Center(child:
+                                      CircularProgressIndicator())
+                                  : conversations.isEmpty
+                                    ? _emptyInbox()
+                                    : ListView.separated(
+                                      padding: const EdgeInsets.fromLTRB(
+                                          9, 3, 9, 14),
+                                      itemCount: conversations.length,
+                                      separatorBuilder: (_, _) => SizedBox(
+                                        height: widget.appearance.layout ==
+                                            MailLayout.compact ? 3 : 8),
+                                      itemBuilder: (context, index) {
+                                        final item = conversations[index];
+                                        return _tile(item.latest,
+                                          selected: item.latest.identity ==
+                                              selected?.identity,
+                                          threadCount: item.count,
+                                          onTap: () => setState(
+                                            () => _selectedMail = item.latest));
+                                      },
+                                    ),
+                            ),
+                          ],
                         ),
-                        child: _syncing && _messages.isEmpty
-                            ? const Center(child: CircularProgressIndicator())
-                            : visibleMessages.isEmpty
-                            ? _emptyInbox()
-                            : ListView.separated(
-                                padding: const EdgeInsets.fromLTRB(
-                                  12,
-                                  6,
-                                  12,
-                                  18,
-                                ),
-                                itemCount: visibleMessages.length,
-                                separatorBuilder: (_, _) =>
-                                    const SizedBox(height: 7),
-                                itemBuilder: (context, index) {
-                                  final mail = visibleMessages[index];
-                                  return _tile(
-                                    mail,
-                                    selected: mail == selected,
-                                    onTap: () =>
-                                        setState(() => _selectedMail = mail),
-                                  );
-                                },
-                              ),
                       ),
+                      VerticalDivider(width: 1, thickness: 1,
+                          color: colors.outlineVariant),
+                      Expanded(child: _desktopMessagePreview(selected)),
+                    ]),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 7, 18, 9),
+                    child: Text(
+                      _syncing
+                          ? 'Checking for new mail…'
+                          : '${_messages.length} messages · Background checks enabled',
+                      style: TextStyle(fontSize: 10.5,
+                          color: colors.onSurfaceVariant),
                     ),
-                    Expanded(child: _desktopMessagePreview(selected)),
-                  ],
-                ),
+                  ),
+                ],
               ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(22, 8, 22, 12),
-                child: Text(
-                  _syncing
-                      ? 'Checking for new mail…'
-                      : 'Auto-checks every 2 minutes  ·  ${_messages.length} messages loaded',
-                  style: const TextStyle(fontSize: 11, color: _muted),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ],
+            ),
+          ],
+        );
+      },
     );
   }
 
   Widget _desktopNavTile(
-    IconData icon,
-    String label,
-    bool selected,
-    VoidCallback onTap, {
-    String? trailing,
-  }) => ListTile(
-    dense: true,
-    contentPadding: const EdgeInsets.symmetric(horizontal: 18),
-    leading: Icon(icon, size: 19, color: selected ? _orange : _muted),
-    title: Text(
-      label,
-      style: TextStyle(
-        fontSize: 13,
-        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-      ),
-    ),
-    trailing: trailing == null
-        ? null
-        : Text(
-            trailing,
-            style: const TextStyle(
-              color: _orange,
-              fontSize: 11,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-    selected: selected,
-    selectedTileColor: _orange.withValues(alpha: .1),
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-    onTap: onTap,
-  );
+    IconData icon, String label, bool selected,
+    VoidCallback onTap, {String? trailing}
+  ) {
+    final colors = Theme.of(context).colorScheme;
+    return ListTile(
+      dense: true,
+      visualDensity: VisualDensity.compact,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+      leading: Icon(icon, size: 18,
+          color: selected ? colors.primary : colors.onSurfaceVariant),
+      title: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis,
+        style: TextStyle(fontSize: 12.5,
+          fontWeight: selected ? FontWeight.w800 : FontWeight.w600)),
+      trailing: trailing == null ? null :
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+          decoration: BoxDecoration(
+            color: colors.primary.withValues(alpha: .11),
+            borderRadius: BorderRadius.circular(8)),
+          child: Text(trailing, style: TextStyle(fontSize: 10,
+            fontWeight: FontWeight.w800, color: colors.primary))),
+      selected: selected,
+      selectedTileColor: colors.primary.withValues(alpha: .09),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(10)),
+      onTap: onTap,
+    );
+  }
 
   Widget _desktopMessagePreview(MailItem? mail) {
     if (mail == null) {

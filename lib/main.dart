@@ -414,10 +414,12 @@ class _MailHomeState extends State<MailHome>
       if (_liveSyncEnabled) {
         await LiveMailService.stop();
         await _vault.writeLiveSyncEnabled(false);
-        if (mounted) setState(() {
+        if (mounted) {
+        setState(() {
           _liveSyncEnabled = false;
           _liveSyncRunning = false;
         });
+      }
         if (mounted) {
         _notice('2-minute live sync stopped. Android periodic checks remain enabled.');
       }
@@ -438,10 +440,12 @@ class _MailHomeState extends State<MailHome>
         return;
       }
       await _vault.writeLiveSyncEnabled(true);
-      if (mounted) setState(() {
+      if (mounted) {
+        setState(() {
         _liveSyncEnabled = true;
         _liveSyncRunning = true;
       });
+      }
       if (mounted) {
         _notice('Live checks enabled, about every 2 minutes while Android permits.');
       }

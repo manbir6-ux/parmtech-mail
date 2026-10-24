@@ -594,7 +594,7 @@ class _MailHomeState extends State<MailHome>
     var refreshAfterConnect = false;
     setState(() => _syncing = true);
     try {
-      final verified = await _service.verify(account);
+      final verified = account; // Verified in AddAccountPage before closing.
       await _vault.add(verified);
       if (!mounted) return;
       setState(() {
@@ -2242,7 +2242,10 @@ class _AddAccountPageState extends State<AddAccountPage> {
   final _password = TextEditingController();
   final _imapHost = TextEditingController();
   final _smtpHost = TextEditingController();
+  final _verifyService = CpanelMailService();
   bool _hide = true;
+  bool _testing = false;
+  String? _connectionError;
   @override
   void dispose() {
     _email.dispose();
@@ -2265,7 +2268,7 @@ class _AddAccountPageState extends State<AddAccountPage> {
             const Icon(Icons.mark_email_read_rounded, size: 50, color: _orange),
             const SizedBox(height: 20),
             const Text(
-              'Add your domain email',
+              'Connect your email account',
               style: TextStyle(
                 fontSize: 28,
                 fontWeight: FontWeight.w900,
@@ -2274,12 +2277,13 @@ class _AddAccountPageState extends State<AddAccountPage> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'We’ll find secure IMAP settings and test the sign-in before saving it.',
+              'Enter your address and password. Your email will only be saved after a secure IMAP connection succeeds.',
               style: TextStyle(color: _muted, height: 1.5),
             ),
             const SizedBox(height: 28),
             TextField(
               controller: _email,
+              onChanged: (_) => setState(() => _connectionError = null),
               keyboardType: TextInputType.emailAddress,
               textInputAction: TextInputAction.next,
               autofillHints: const [AutofillHints.email],
@@ -2307,11 +2311,29 @@ class _AddAccountPageState extends State<AddAccountPage> {
                 ),
               ),
             ),
+            const SizedBox(height: 12),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              child: Text(
+                mailSetupHint(_email.text),
+                style: const TextStyle(fontSize: 12, height: 1.5, color: _muted),
+              ),
+            ),
+            if (isValidMailAddress(_email.text)) ...[
+              const SizedBox(height: 5),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 4),
+                child: Text(
+                  'Suggested: IMAP ${cPanelHostCandidates(_email.text).first.host} · SMTP ${recommendedSmtpHost(_email.text)}',
+                  style: const TextStyle(fontSize: 11, color: _orange),
+                ),
+              ),
+            ],
             const SizedBox(height: 10),
             ExpansionTile(
               tilePadding: EdgeInsets.zero,
               title: const Text('Advanced server settings'),
-              subtitle: const Text('Use separate hostnames from your email provider'),
+              subtitle: const Text('Use exact Secure SSL/TLS server names from your provider'),
               children: [
                 TextField(
                   controller: _imapHost,
@@ -2338,12 +2360,49 @@ class _AddAccountPageState extends State<AddAccountPage> {
               ],
             ),
             const SizedBox(height: 22),
+            if (_connectionError != null) ...[
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Theme.of(context).colorScheme.errorContainer,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Connection could not be verified',
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onErrorContainer,
+                        fontWeight: FontWeight.bold,
+                      )),
+                    const SizedBox(height: 8),
+                    SelectableText(
+                      _connectionError!,
+                      style: TextStyle(
+                        height: 1.45,
+                        color: Theme.of(context).colorScheme.onErrorContainer,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'You can adjust the IMAP/SMTP hostnames above and retry without retyping your password.',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+            ],
             FilledButton.icon(
-              onPressed: _submit,
-              icon: const Icon(Icons.lock_rounded),
-              label: const Padding(
-                padding: EdgeInsets.symmetric(vertical: 14),
-                child: Text('Verify and connect'),
+              onPressed: _testing ? null : _submit,
+              icon: _testing
+                  ? const SizedBox(height: 18, width: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.lock_rounded),
+              label: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                child: Text(_testing ? 'Testing secure connection…' : 'Verify and connect'),
               ),
             ),
             const SizedBox(height: 14),
@@ -2357,39 +2416,52 @@ class _AddAccountPageState extends State<AddAccountPage> {
       ),
     ),
   );
-  void _submit() {
+  Future<void> _submit() async {
     final email = _email.text.trim();
     if (!isValidMailAddress(email) || _password.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Enter a valid email address and password.'),
-        ),
+        const SnackBar(content: Text('Enter a valid email address and password.')),
       );
       return;
     }
-    final defaultHost = cPanelHostCandidates(email).first.host;
+    final recommended = cPanelHostCandidates(email);
+    if (recommended.isEmpty) return;
+    final manual = _imapHost.text.trim().isNotEmpty ||
+        _smtpHost.text.trim().isNotEmpty;
     final imapHost = _imapHost.text.trim().isEmpty
-        ? defaultHost
+        ? recommended.first.host
         : _imapHost.text.trim().toLowerCase();
     final smtpHost = _smtpHost.text.trim().isEmpty
-        ? imapHost
+        ? recommendedSmtpHost(email)
         : _smtpHost.text.trim().toLowerCase();
     if (!isValidMailServerHost(imapHost) ||
         !isValidMailServerHost(smtpHost)) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Enter valid DNS hostnames without https:// or port numbers.'),
+        content: Text('Enter DNS hostnames without https:// or port numbers.'),
       ));
       return;
     }
-    Navigator.pop(
-      context,
-      MailAccount(
+
+    setState(() {
+      _testing = true;
+      _connectionError = null;
+    });
+    try {
+      final verified = await _verifyService.verify(MailAccount(
         email: email,
         password: _password.text,
         imapHost: imapHost,
         smtpHost: smtpHost,
-      ),
-    );
+        useCustomServer: manual,
+      ));
+      if (mounted) Navigator.pop(context, verified);
+    } catch (error) {
+      if (mounted) {
+        setState(() => _connectionError = friendlyMailError(error));
+      }
+    } finally {
+      if (mounted) setState(() => _testing = false);
+    }
   }
 }
 

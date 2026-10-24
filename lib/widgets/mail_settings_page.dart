@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 
 import '../data/appearance/mail_appearance.dart';
@@ -70,7 +71,7 @@ class _MailSettingsPageState extends State<MailSettingsPage> {
     selected: font == _selected.font,
     label: Text(
       font.label,
-      style: TextStyle(fontFamily: font.family, fontSize: 13),
+      style: TextStyle(fontFamily: font.familyForPlatform(defaultTargetPlatform), fontSize: 13),
     ),
     onSelected: (_) => _change(_selected.copyWith(font: font)),
   );
@@ -155,13 +156,13 @@ class _MailSettingsPageState extends State<MailSettingsPage> {
                   const SizedBox(height: 12),
                   Text('This is how your inbox will look.',
                     style: TextStyle(
-                      fontFamily: _selected.font.family,
+                      fontFamily: _selected.font.familyForPlatform(defaultTargetPlatform),
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
                   const SizedBox(height: 5),
-                  const Text('Offline system fonts; available without a data connection.',
+                  const Text('Installed system fonts. Exact appearance may vary by platform.',
                       style: TextStyle(fontSize: 11)),
                 ],
               ),

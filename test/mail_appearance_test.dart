@@ -16,6 +16,24 @@ void main() {
     expect(MailFont.values.map((f) => f.family).toSet().length, 6);
   });
 
+  test('each desktop OS resolves a system font for all six choices', () {
+    for (final platform in [
+      TargetPlatform.windows,
+      TargetPlatform.macOS,
+      TargetPlatform.linux,
+    ]) {
+      final families = MailFont.values
+          .map((font) => font.familyForPlatform(platform))
+          .toList();
+      expect(families.every((family) => family.trim().isNotEmpty), isTrue);
+      expect(families.toSet().length, 6);
+    }
+    expect(MailFont.mono.familyForPlatform(TargetPlatform.windows),
+        'Consolas');
+    expect(MailFont.editorial.familyForPlatform(TargetPlatform.macOS),
+        'Georgia');
+  });
+
   test('there are three actual inbox layouts', () {
     expect(MailLayout.values.length, 3);
     expect(MailLayout.values, contains(MailLayout.compact));

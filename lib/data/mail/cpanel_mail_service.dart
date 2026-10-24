@@ -6,6 +6,7 @@ import 'package:enough_mail/enough_mail.dart' as mail;
 
 import '../accounts/mail_account.dart' as model;
 import 'mail_presentation.dart';
+import 'mail_fetch_guard.dart';
 
 /// A small file selected for SMTP submission. Never saved to mail caches.
 class OutgoingMailAttachment {
@@ -187,17 +188,27 @@ class CpanelMailService {
   }) async {
     final session = await _connectAndLogin(account);
     try {
-      if (folderPath.toUpperCase() == 'INBOX') {
-        await session.client.selectInbox();
-      } else {
-        await session.client.selectMailboxByPath(folderPath);
-      }
-      final result = await session.client.fetchRecentMessages(
-        messageCount: count,
-        criteria: 'BODY.PEEK[]',
-        responseTimeout: _responseTimeout,
+      // SELECT can report zero EXISTS after another device emptied the folder.
+      // Calling fetchRecentMessages in that state generates FETCH 0:1, which
+      // cPanel correctly rejects with BAD Invalid messageset.
+      final result = await guardedImapFetch<List<mail.MimeMessage>>(
+        selectAndCount: () async {
+          final box = folderPath.toUpperCase() == 'INBOX'
+              ? await session.client.selectInbox()
+              : await session.client.selectMailboxByPath(folderPath);
+          return box.messagesExists;
+        },
+        fetch: () async {
+          final response = await session.client.fetchRecentMessages(
+            messageCount: count,
+            criteria: '(UID FLAGS INTERNALDATE BODY.PEEK[])',
+            responseTimeout: _responseTimeout,
+          );
+          return response.messages;
+        },
+        empty: () => <mail.MimeMessage>[],
       );
-      return result.messages.reversed
+      return result.reversed
           .map((message) {
             final plainBody = message.decodeTextPlainPart()?.trim() ?? '';
             final body = plainBody.isNotEmpty
@@ -273,11 +284,21 @@ class CpanelMailService {
     await deleteMessages(account, [item]);
   }
 
+  Future<bool> _uidExists(mail.ImapClient client, int uid) async {
+    final found = await client.uidSearchMessages(
+      searchCriteria: 'UID $uid',
+      responseTimeout: _responseTimeout,
+    );
+    return found.matchingSequence?.isNotEmpty ?? false;
+  }
+
+  /// Server truth wins: a message missing from its original IMAP folder is
+  /// already gone and should be removed from the device cache without error.
   Future<void> deleteMessages(model.MailAccount account, List<MailItem> items) async {
     if (items.isEmpty) return;
-    if (items.any((item) => item.uid == null || item.uid! <= 0)) {
-      throw const MailConnectionException('Refresh messages before deleting them.');
-    }
+    final validItems = items.where((item) => item.uid != null && item.uid! > 0)
+        .toList(growable: false);
+    if (validItems.isEmpty) return; // legacy offline entries
     final folders = await listFolders(account);
     final trash = folders.where((folder) =>
         RegExp(r'^(trash|deleted|deleted items|bin)$', caseSensitive: false)
@@ -285,34 +306,27 @@ class CpanelMailService {
     final session = await _connectAndLogin(account);
     try {
       final byFolder = <String, List<MailItem>>{};
-      for (final item in items) {
+      for (final item in validItems) {
         byFolder.putIfAbsent(item.mailboxPath, () => []).add(item);
       }
       for (final entry in byFolder.entries) {
-        if (entry.key.toUpperCase() == 'INBOX') {
-          await session.client.selectInbox();
-        } else {
-          await session.client.selectMailboxByPath(entry.key);
-        }
-        if (trash.isNotEmpty && trash.first.path != entry.key) {
-          for (final item in entry.value) {
-            final uid = item.uid!;
+        final mailbox = entry.key.toUpperCase() == 'INBOX'
+            ? await session.client.selectInbox()
+            : await session.client.selectMailboxByPath(entry.key);
+        if (mailbox.messagesExists <= 0) continue;
+        for (final item in entry.value) {
+          final uid = item.uid!;
+          if (!await _uidExists(session.client, uid)) continue;
+          final sequence = mail.MessageSequence.fromRange(
+            uid, uid, isUidSequence: true,
+          );
+          if (trash.isNotEmpty && trash.first.path != entry.key) {
             await session.client.uidMove(
-              mail.MessageSequence.fromRange(uid, uid, isUidSequence: true),
+              sequence,
               targetMailboxPath: trash.first.path,
             );
-          }
-        } else {
-          for (final item in entry.value) {
-            final uid = item.uid!;
-            final sequence = mail.MessageSequence.fromRange(
-              uid,
-              uid,
-              isUidSequence: true,
-            );
-            await session.client.uidMarkDeleted(
-              sequence,
-            );
+          } else {
+            await session.client.uidMarkDeleted(sequence);
             await session.client.uidExpunge(sequence);
           }
         }

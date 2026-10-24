@@ -25,6 +25,13 @@ jobs:
         run: flutter create . --platforms=android,ios,windows,macos,linux
       - name: Prepare Android security and Gradle config
         run: python3 tool/prepare_android.py
+      - name: Configure permanent Android signing when repository keys exist
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: python3 tool/configure_android_signing.py
       - name: Install dependencies
         run: flutter pub get
       - name: Flutter static analysis

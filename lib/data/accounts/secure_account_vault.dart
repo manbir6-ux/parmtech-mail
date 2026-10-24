@@ -94,23 +94,43 @@ class SecureAccountVault {
   String _accountCachePrefix(String accountId) =>
       '$_mailCachePrefix${Uri.encodeComponent(accountId)}.';
 
+  /// Legacy cache keys use a period between account ID and folder, while
+  /// email domains also contain periods. Prefer the longest connected account
+  /// prefix so removing info@example.com never removes info@example.com.au.
+  Future<List<String>> _ownedCacheKeys(
+    String accountId,
+    Iterable<String> storedKeys,
+  ) async {
+    final prefix = _accountCachePrefix(accountId);
+    final otherPrefixes = (await readAll())
+        .where((account) => account.id != accountId)
+        .map((account) => _accountCachePrefix(account.id))
+        .where((other) => other.length > prefix.length)
+        .toList(growable: false);
+    return storedKeys
+        .where((key) =>
+            key.startsWith(prefix) &&
+            !otherPrefixes.any((other) => key.startsWith(other)))
+        .toList(growable: false);
+  }
+
   /// Includes every locally cached folder for this account, not only folders
   /// currently displayed in the active account's UI. Used for full exports.
   Future<Map<String, String>> readMailCaches(String accountId) async {
-    final prefix = _accountCachePrefix(accountId);
     final stored = await _storage.readAll();
+    final prefix = _accountCachePrefix(accountId);
+    final owned = await _ownedCacheKeys(accountId, stored.keys);
     return {
-      for (final entry in stored.entries)
-        if (entry.key.startsWith(prefix))
-          Uri.decodeComponent(entry.key.substring(prefix.length)): entry.value,
+      for (final key in owned)
+        Uri.decodeComponent(key.substring(prefix.length)): stored[key]!,
     };
   }
 
   Future<void> _deleteMailCaches(String accountId) async {
-    final prefix = _accountCachePrefix(accountId);
-    final keys = (await _storage.readAll()).keys
-        .where((key) => key.startsWith(prefix))
-        .toList(growable: false);
+    final keys = await _ownedCacheKeys(
+      accountId,
+      (await _storage.readAll()).keys,
+    );
     for (final key in keys) {
       await _storage.delete(key: key);
     }

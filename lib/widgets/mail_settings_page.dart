@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-class MailSettingsPage extends StatelessWidget {
+class MailSettingsPage extends StatefulWidget {
   const MailSettingsPage({
     super.key,
     required this.darkTheme,
@@ -19,6 +19,24 @@ class MailSettingsPage extends StatelessWidget {
   final Future<void> Function() onAddAccount;
   final List<String> accountEmails;
   final Future<void> Function(int index) onRemoveAccount;
+
+  @override
+  State<MailSettingsPage> createState() => _MailSettingsPageState();
+}
+
+class _MailSettingsPageState extends State<MailSettingsPage> {
+  late bool _currentDark;
+
+  @override
+  void initState() {
+    super.initState();
+    _currentDark = widget.darkTheme;
+  }
+
+  void _toggleTheme() {
+    widget.onThemeToggle();
+    setState(() => _currentDark = !_currentDark);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -59,33 +77,33 @@ class MailSettingsPage extends StatelessWidget {
           const _SectionTitle('Appearance'),
           _SettingsPanel(children: [
             ListTile(
-              leading: Icon(darkTheme
+              leading: Icon(_currentDark
                   ? Icons.dark_mode_rounded : Icons.light_mode_rounded),
               title: const Text('Dark appearance'),
-              subtitle: Text(darkTheme ? 'On' : 'Off'),
+              subtitle: Text(_currentDark ? 'On' : 'Off'),
               trailing: Switch(
-                value: darkTheme,
-                onChanged: (_) => onThemeToggle(),
+                value: _currentDark,
+                onChanged: (_) => _toggleTheme(),
               ),
-              onTap: onThemeToggle,
+              onTap: _toggleTheme,
             ),
           ]),
           const SizedBox(height: 25),
           const _SectionTitle('Accounts'),
           _SettingsPanel(children: [
-            for (var i = 0; i < accountEmails.length; i++)
+            for (var i = 0; i < widget.accountEmails.length; i++)
               ListTile(
                 leading: CircleAvatar(
                   backgroundColor: colors.primaryContainer,
-                  child: Text(accountEmails[i][0].toUpperCase(),
+                  child: Text(widget.accountEmails[i][0].toUpperCase(),
                       style: TextStyle(color: colors.onPrimaryContainer,
                           fontWeight: FontWeight.w800)),
                 ),
-                title: Text(accountEmails[i],
+                title: Text(widget.accountEmails[i],
                     maxLines: 1, overflow: TextOverflow.ellipsis),
                 trailing: IconButton(
                   tooltip: 'Remove account',
-                  onPressed: () => onRemoveAccount(i),
+                  onPressed: () => widget.onRemoveAccount(i),
                   icon: const Icon(Icons.logout_rounded, size: 19),
                 ),
               ),
@@ -93,7 +111,7 @@ class MailSettingsPage extends StatelessWidget {
               leading: const Icon(Icons.person_add_alt_1_rounded),
               title: const Text('Connect another account'),
               trailing: const Icon(Icons.chevron_right_rounded),
-              onTap: onAddAccount,
+              onTap: widget.onAddAccount,
             ),
           ]),
           const SizedBox(height: 25),
@@ -104,7 +122,7 @@ class MailSettingsPage extends StatelessWidget {
               title: const Text('Export encrypted backup'),
               subtitle: const Text('Save your accounts and offline email cache'),
               trailing: const Icon(Icons.chevron_right_rounded),
-              onTap: onExportBackup,
+              onTap: widget.onExportBackup,
             ),
             const Divider(height: 1, indent: 58),
             ListTile(
@@ -112,7 +130,7 @@ class MailSettingsPage extends StatelessWidget {
               title: const Text('Import backup'),
               subtitle: const Text('Restore a password-protected .ptmail file'),
               trailing: const Icon(Icons.chevron_right_rounded),
-              onTap: onImportBackup,
+              onTap: widget.onImportBackup,
             ),
           ]),
           const SizedBox(height: 25),

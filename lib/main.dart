@@ -1366,76 +1366,142 @@ class _MailHomeState extends State<MailHome>
     );
   }
 
-  Widget _header(MailAccount? account) => Padding(
-    padding: const EdgeInsets.fromLTRB(20, 8, 20, 10),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: Text(
-                _activeFolderName,
-                style: const TextStyle(
-                  fontSize: 25,
-                   fontWeight: FontWeight.w800,
-                  letterSpacing: -.7,
-                ),
-              ),
-            ),
-            if (account != null) _connectionPill(),
+  Widget _header(MailAccount? account) {
+    final colors = Theme.of(context).colorScheme;
+    final conversations = groupMailConversations(_messages).length;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 5, 12, 11),
+      padding: const EdgeInsets.fromLTRB(17, 17, 17, 14),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            _panel,
+            _orange.withValues(alpha: _darkTheme ? .17 : .075),
           ],
+          begin: Alignment.centerLeft,
+          end: Alignment.topRight,
         ),
-        const SizedBox(height: 9),
-        if (_folders.isNotEmpty)
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: _folders
-                  .map(
-                    (f) => Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(
-                        label: Text(_folderTitle(f)),
-                        selected: f.path == _folderPath,
-                        onSelected: (_) => _selectFolder(f),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: _orange.withValues(alpha: .13)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _activeFolderName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 30,
+                        fontWeight: FontWeight.w900,
+                        height: 1.1,
+                        letterSpacing: -1.1,
                       ),
                     ),
-                  )
-                  .toList(),
-            ),
-          )
-        else
-          const Text(
-            'Your latest messages, synced securely',
-            style: TextStyle(color: _muted, fontSize: 12),
+                    const SizedBox(height: 5),
+                    Row(
+                      children: [
+                        Container(
+                          width: 6,
+                          height: 6,
+                          decoration: const BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: _sky,
+                          ),
+                        ),
+                        const SizedBox(width: 7),
+                        Text(
+                          _syncing
+                              ? 'SYNCING YOUR MAIL'
+                              : '$conversations CONVERSATIONS',
+                          style: TextStyle(
+                            color: colors.onSurfaceVariant,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 1,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              if (account != null) _connectionPill(),
+            ],
           ),
-      ],
-    ),
-  );
+          if (_folders.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: _folders.map((folder) {
+                  final selected = folder.path == _folderPath;
+                  return Padding(
+                    padding: const EdgeInsets.only(right: 7),
+                    child: ChoiceChip(
+                      showCheckmark: false,
+                      avatar: selected
+                          ? const Icon(Icons.check_rounded, size: 15)
+                          : null,
+                      label: Text(_folderTitle(folder)),
+                      selected: selected,
+                      onSelected: (_) => _selectFolder(folder),
+                      selectedColor: _orange.withValues(alpha: .18),
+                      backgroundColor: colors.surface.withValues(alpha: .8),
+                      labelStyle: TextStyle(
+                        color: selected ? colors.primary : colors.onSurface,
+                        fontSize: 12,
+                        fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                      ),
+                      side: BorderSide(
+                        color: selected
+                            ? _orange.withValues(alpha: .36)
+                            : colors.outlineVariant.withValues(alpha: .48),
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      visualDensity: VisualDensity.compact,
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 
   Widget _connectionPill() => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-    decoration: BoxDecoration(
-      color: _orange.withValues(alpha: .12),
-      borderRadius: BorderRadius.circular(30),
-    ),
-    child: const Row(
-      children: [
-        Icon(Icons.lock_rounded, size: 13, color: _orange),
-        SizedBox(width: 5),
-        Text(
-          'SECURE',
-          style: TextStyle(
-            color: _orange,
-            fontSize: 10,
-            fontWeight: FontWeight.w800,
-            letterSpacing: .7,
-          ),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+        decoration: BoxDecoration(
+          color: _orange.withValues(alpha: .13),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: _orange.withValues(alpha: .16)),
         ),
-      ],
-    ),
-  );
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.verified_user_rounded, size: 14, color: _orange),
+            SizedBox(width: 5),
+            Text('SECURE',
+                style: TextStyle(
+                  color: _orange,
+                  fontSize: 10,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: .6,
+                )),
+          ],
+        ),
+      );
 
   Widget _messageList() {
     final query = _search.text.trim().toLowerCase();

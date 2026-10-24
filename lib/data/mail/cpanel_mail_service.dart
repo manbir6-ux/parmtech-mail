@@ -201,7 +201,7 @@ class CpanelMailService {
         fetch: () async {
           final response = await session.client.fetchRecentMessages(
             messageCount: count,
-            criteria: 'BODY.PEEK[]',
+            criteria: '(UID FLAGS INTERNALDATE BODY.PEEK[])',
             responseTimeout: _responseTimeout,
           );
           return response.messages;

@@ -72,7 +72,52 @@ jobs:
           $sourceDir = (Resolve-Path "build\windows\x64\runner\Release").Path
           $outputDir = Join-Path $PWD "artifacts"
           New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
-          & $compiler "/DSourceDir=$sourceDir" "/DOutputDir=$outputDir" windows\installer\ParmtechMail.iss
+          $versionText = (Get-Content pubspec.yaml | Where-Object { $_ -match '^version:\\s*' } | Select-Object -First 1)
+          if (!$versionText) { throw "Could not read app version from pubspec.yaml" }
+          $appVersion = (($versionText -replace '^version:\\s*', '') -split '\\+')[0].Trim()
+          if ($appVersion -notmatch '^\\d+\\.\\d+\\.\\d+
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parmtech-mail-windows
+          path: |
+            ParmTech-Mail-Windows.zip
+            artifacts/ParmTech-Mail-Setup.exe
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - run: sudo apt-get update && sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libsecret-1-dev
+      - run: flutter create . --platforms=linux
+      - run: flutter pub get
+      - run: flutter build linux --release
+      - run: tar -czf ParmTech-Mail-Linux-x64.tar.gz -C build/linux/x64/release/bundle .
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parmtech-mail-linux-x64
+          path: ParmTech-Mail-Linux-x64.tar.gz
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with: { channel: stable, cache: true }
+      - run: flutter create . --platforms=macos
+      - name: Enable macOS outgoing mail connections
+        run: python3 tool/prepare_macos.py
+      - run: flutter pub get
+      - run: flutter build macos --release
+      - run: hdiutil create -volname "ParmTech Mail" -srcfolder build/macos/Build/Products/Release/parm_mail.app -ov -format UDZO ParmTech-Mail-macOS.dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parmtech-mail-macos
+          path: ParmTech-Mail-macOS.dmg
+) { throw "Invalid app version: $appVersion" }
+          & $compiler "/DSourceDir=$sourceDir" "/DOutputDir=$outputDir" "/DAppVersion=$appVersion" windows\installer\ParmtechMail.iss
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:

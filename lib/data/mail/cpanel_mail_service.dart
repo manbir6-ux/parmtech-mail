@@ -26,6 +26,10 @@ class MailItem {
     this.uid,
     this.mailboxPath = 'INBOX',
     this.starred = false,
+    this.messageId = '',
+    this.inReplyTo = '',
+    this.references = '',
+    this.replyToAddress = '',
   });
 
   final String sender;
@@ -38,6 +42,10 @@ class MailItem {
   final int? uid;
   final String mailboxPath;
   final bool starred;
+  final String messageId;
+  final String inReplyTo;
+  final String references;
+  final String replyToAddress;
 
   String get identity => uid == null
       ? '$mailboxPath|$senderAddress|$subject|${sentAt?.millisecondsSinceEpoch ?? time}'
@@ -54,6 +62,10 @@ class MailItem {
         'uid': uid,
         'mailboxPath': mailboxPath,
         'starred': starred,
+        'messageId': messageId,
+        'inReplyTo': inReplyTo,
+        'references': references,
+        'replyToAddress': replyToAddress,
       };
 
   factory MailItem.fromJson(Map<String, dynamic> json) => MailItem(
@@ -67,6 +79,10 @@ class MailItem {
         uid: json['uid'] as int?,
         mailboxPath: json['mailboxPath'] as String? ?? 'INBOX',
         starred: json['starred'] as bool? ?? false,
+        messageId: json['messageId'] as String? ?? '',
+        inReplyTo: json['inReplyTo'] as String? ?? '',
+        references: json['references'] as String? ?? '',
+        replyToAddress: json['replyToAddress'] as String? ?? '',
       );
 
   MailItem copyWith({bool? unread, bool? starred}) => MailItem(
@@ -80,6 +96,10 @@ class MailItem {
         uid: uid,
         mailboxPath: mailboxPath,
         starred: starred ?? this.starred,
+        messageId: messageId,
+        inReplyTo: inReplyTo,
+        references: references,
+        replyToAddress: replyToAddress,
       );
 }
 
@@ -216,6 +236,10 @@ class CpanelMailService {
               uid: message.uid,
               mailboxPath: folderPath,
               starred: message.isFlagged,
+              messageId: message.getHeaderValue('Message-ID')?.trim() ?? '',
+              inReplyTo: message.getHeaderValue('In-Reply-To')?.trim() ?? '',
+              references: message.getHeaderValue('References')?.trim() ?? '',
+              replyToAddress: message.replyTo?.firstOrNull?.email.trim() ?? senderAddress,
             );
           })
           .toList(growable: false);
@@ -342,6 +366,8 @@ class CpanelMailService {
     required String subject,
     required String body,
     List<OutgoingMailAttachment> attachments = const [],
+    String? inReplyTo,
+    String? references,
   }) async {
     if (attachments.fold<int>(0, (size, file) => size + file.bytes.length) >
         20 * 1024 * 1024) {
@@ -413,6 +439,14 @@ class CpanelMailService {
         builder.from = [mail.MailAddress('', account.email.trim())];
         builder.to = [mail.MailAddress('', to.trim())];
         builder.subject = subject;
+        // RFC 5322: these headers let Yahoo, Gmail and other mail clients
+        // place replies inside the existing conversation.
+        if (inReplyTo != null && inReplyTo.trim().isNotEmpty) {
+          builder.addHeader('In-Reply-To', inReplyTo.trim());
+          final prior = references?.trim() ?? '';
+          final threadRefs = prior.isEmpty ? inReplyTo.trim() : '$prior ${inReplyTo.trim()}';
+          builder.addHeader('References', threadRefs);
+        }
         for (final file in attachments) {
           final name = file.name.replaceAll(RegExp(r'[\r\n\\/]'), '_');
           builder.addBinary(

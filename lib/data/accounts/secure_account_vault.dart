@@ -17,6 +17,7 @@ class SecureAccountVault {
   static const String _storageKey = 'parm_mail.accounts.v1';
   static const String _unreadCountsKey = 'parm_mail.unread_counts.v1';
   static const String _mailCachePrefix = 'parm_mail.cache.';
+  static const String _liveSyncKey = 'parm_mail.live_sync.v1';
   final FlutterSecureStorage _storage;
 
   Future<List<MailAccount>> readAll() async {
@@ -61,6 +62,12 @@ class SecureAccountVault {
     unreadCounts.remove(id);
     await writeUnreadCounts(unreadCounts);
   }
+
+  Future<bool> readLiveSyncEnabled() async =>
+      (await _storage.read(key: _liveSyncKey)) == 'true';
+
+  Future<void> writeLiveSyncEnabled(bool enabled) =>
+      _storage.write(key: _liveSyncKey, value: enabled ? 'true' : 'false');
 
   Future<Map<String, int>> readUnreadCounts() async {
     final raw = await _storage.read(key: _unreadCountsKey);
@@ -143,6 +150,7 @@ class SecureAccountVault {
         .where((key) =>
             key == _storageKey ||
             key == _unreadCountsKey ||
+            key == _liveSyncKey ||
             key.startsWith(_mailCachePrefix))
         .toList(growable: false);
     for (final key in keys) {

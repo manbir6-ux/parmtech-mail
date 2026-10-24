@@ -9,10 +9,14 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:tray_manager/tray_manager.dart' as tray;
 import 'package:window_manager/window_manager.dart';
 import 'data/background/mail_background_sync.dart';
+import 'data/background/live_mail_service.dart';
 import 'data/accounts/mail_account.dart';
 import 'data/accounts/secure_account_vault.dart';
 import 'data/backup/encrypted_mail_backup.dart';
 import 'data/mail/cpanel_mail_service.dart';
+import 'data/mail/mail_conversations.dart';
+import 'data/mail/mail_presentation.dart';
+import 'widgets/inline_reply_box.dart';
 import 'data/notifications/mail_notifications.dart';
 
 Future<void> main() async {
@@ -21,6 +25,7 @@ Future<void> main() async {
   if (Platform.isAndroid) {
     try {
       await AndroidMailBackgroundSync.initialize();
+      await LiveMailService.configure();
     } catch (_) {
       // A scheduler issue should not prevent the mailbox UI from opening.
     }
@@ -28,12 +33,11 @@ Future<void> main() async {
   runApp(const ParmMailApp());
 }
 
-bool _darkTheme = true;
-Color get _ink =>
-    _darkTheme ? const Color(0xFF101719) : const Color(0xFFF3F7F6);
-Color get _panel => _darkTheme ? const Color(0xFF192224) : Colors.white;
-const _orange = Color(0xFF16B89A);
-const _muted = Color(0xFF788681);
+bool _darkTheme = false;
+Color get _ink => _darkTheme ? const Color(0xFF0F1624) : const Color(0xFFF6F8FC);
+Color get _panel => _darkTheme ? const Color(0xFF192438) : Colors.white;
+const _orange = Color(0xFF4F6FE8);
+const _muted = Color(0xFF8390A3);
 
 class ParmMailApp extends StatefulWidget {
   const ParmMailApp({super.key});
@@ -123,6 +127,8 @@ class _MailHomeState extends State<MailHome>
   MailItem? _selectedMail;
   final Set<String> _selectedMessageIds = <String>{};
   bool _quitting = false;
+  bool _liveSyncEnabled = false;
+  bool _liveSyncRunning = false;
 
   @override
   void initState() {
@@ -158,14 +164,10 @@ class _MailHomeState extends State<MailHome>
 
   Future<void> _resumeForegroundSync() async {
     _autoSyncTimer?.cancel();
-    if (Platform.isAndroid) {
-      try {
-        await AndroidMailBackgroundSync.cancel();
-      } catch (_) {}
-    }
+    if (Platform.isAndroid) unawaited(_scheduleAndroidBackgroundSync());
     if (!_quitting && mounted && _accounts.isNotEmpty) {
       _autoSyncTimer = Timer.periodic(
-        const Duration(minutes: 5),
+        const Duration(minutes: 2),
         (_) => unawaited(_autoCheckInboxes()),
       );
     }
@@ -265,6 +267,7 @@ class _MailHomeState extends State<MailHome>
     }
     try {
       final saved = await _vault.readAll();
+      final livePreference = Platform.isAndroid && await _vault.readLiveSyncEnabled();
       _lastUnreadByEmail.addAll(await _vault.readUnreadCounts());
       // Render the last encrypted Inbox cache immediately. Network discovery
       // and IMAP sync happen afterwards and must never block the first screen.
@@ -284,17 +287,27 @@ class _MailHomeState extends State<MailHome>
       if (!mounted) return;
       setState(() {
         _accounts = saved;
+        _liveSyncEnabled = livePreference;
         _messages = cachedInbox;
         _selectedMail = cachedInbox.isEmpty ? null : cachedInbox.first;
         _loading = false;
       });
       if (saved.isNotEmpty) {
+        if (Platform.isAndroid) {
+          unawaited(_scheduleAndroidBackgroundSync());
+          if (livePreference) {
+            unawaited(LiveMailService.start().then((started) {
+              if (mounted) setState(() => _liveSyncRunning = started);
+            }).catchError((Object _) {}));
+          }
+        }
         unawaited(_loadFolders());
         unawaited(_refresh());
         unawaited(_seedUnreadCounts());
       } else if (Platform.isAndroid) {
         try {
           await AndroidMailBackgroundSync.cancel();
+          await LiveMailService.stop();
         } catch (_) {}
       }
       if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.paused) {
@@ -391,6 +404,54 @@ class _MailHomeState extends State<MailHome>
         _refreshQueued = false;
         setState(() => _syncing = false);
         if (shouldRefresh) unawaited(_refresh());
+      }
+    }
+  }
+
+  Future<void> _toggleLiveSync() async {
+    if (!Platform.isAndroid || _accounts.isEmpty) return;
+    try {
+      if (_liveSyncEnabled) {
+        await LiveMailService.stop();
+        await _vault.writeLiveSyncEnabled(false);
+        if (mounted) {
+        setState(() {
+          _liveSyncEnabled = false;
+          _liveSyncRunning = false;
+        });
+      }
+        if (mounted) {
+        _notice('2-minute live sync stopped. Android periodic checks remain enabled.');
+      }
+        return;
+      }
+      final allowed = await _notifications.requestPermission();
+      if (!allowed) {
+        if (mounted) {
+        _notice('Allow notifications in Android Settings to receive new mail alerts.');
+      }
+        return;
+      }
+      final started = await LiveMailService.start();
+      if (!started) {
+        if (mounted) {
+        _notice('Could not start live sync. Android may be blocking background services.');
+      }
+        return;
+      }
+      await _vault.writeLiveSyncEnabled(true);
+      if (mounted) {
+        setState(() {
+        _liveSyncEnabled = true;
+        _liveSyncRunning = true;
+      });
+      }
+      if (mounted) {
+        _notice('Live checks enabled, about every 2 minutes while Android permits.');
+      }
+    } catch (error) {
+      if (mounted) {
+        _notice('Live sync unavailable: $error');
       }
     }
   }
@@ -575,12 +636,13 @@ class _MailHomeState extends State<MailHome>
     if (sent == true) await _refresh();
   }
 
-  Future<void> _open(MailItem message) async {
+  Future<void> _open(MailItem message, {List<MailItem> conversation = const []}) async {
     if (message.unread) unawaited(_actOnMail(message, 'read'));
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => MailDetailPage(
           message: message,
+          conversation: conversation,
           account: _accounts.isEmpty ? null : _accounts[_active],
           service: _service,
           folders: _folders,
@@ -926,15 +988,12 @@ class _MailHomeState extends State<MailHome>
                 );
               },
             ),
-      floatingActionButton: account == null ? null : FloatingActionButton.extended(
+      floatingActionButton: account == null ? null : FloatingActionButton.small(
+        tooltip: 'Compose email',
         onPressed: _compose,
         backgroundColor: _orange,
-        foregroundColor: Colors.black,
-        icon: const Icon(Icons.edit_rounded),
-        label: const Text(
-          'Compose',
-          style: TextStyle(fontWeight: FontWeight.w800),
-        ),
+        foregroundColor: Colors.white,
+        child: const Icon(Icons.edit_rounded),
       ),
     );
   }
@@ -1213,7 +1272,7 @@ class _MailHomeState extends State<MailHome>
                 child: Text(
                   _syncing
                       ? 'Checking for new mail…'
-                      : 'Auto-checks every 5 minutes  ·  ${_messages.length} messages loaded',
+                      : 'Auto-checks every 2 minutes  ·  ${_messages.length} messages loaded',
                   style: const TextStyle(fontSize: 11, color: _muted),
                 ),
               ),
@@ -1356,8 +1415,8 @@ class _MailHomeState extends State<MailHome>
               child: Text(
                 _activeFolderName,
                 style: const TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w900,
+                  fontSize: 25,
+                   fontWeight: FontWeight.w800,
                   letterSpacing: -.7,
                 ),
               ),
@@ -1365,7 +1424,7 @@ class _MailHomeState extends State<MailHome>
             if (account != null) _connectionPill(),
           ],
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 9),
         if (_folders.isNotEmpty)
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
@@ -1396,17 +1455,17 @@ class _MailHomeState extends State<MailHome>
   Widget _connectionPill() => Container(
     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
     decoration: BoxDecoration(
-      color: const Color(0xFF17372C),
+      color: _orange.withValues(alpha: .12),
       borderRadius: BorderRadius.circular(30),
     ),
     child: const Row(
       children: [
-        Icon(Icons.lock_rounded, size: 13, color: Color(0xFF72D6A6)),
+        Icon(Icons.lock_rounded, size: 13, color: _orange),
         SizedBox(width: 5),
         Text(
           'SECURE',
           style: TextStyle(
-            color: Color(0xFF8AE0B4),
+            color: _orange,
             fontSize: 10,
             fontWeight: FontWeight.w800,
             letterSpacing: .7,
@@ -1436,6 +1495,7 @@ class _MailHomeState extends State<MailHome>
         ),
       );
     }
+    final conversations = groupMailConversations(visible);
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 900),
@@ -1443,15 +1503,20 @@ class _MailHomeState extends State<MailHome>
           onRefresh: _refresh,
           child: ListView.separated(
             padding: const EdgeInsets.fromLTRB(14, 2, 14, 100),
-            itemCount: visible.length,
+            itemCount: conversations.length,
             separatorBuilder: (_, _) => Divider(
               height: 1,
               indent: 70,
               color: _darkTheme ? Colors.white10 : Colors.black12,
             ),
             itemBuilder: (context, index) => _tile(
-              visible[index],
+              conversations[index].latest,
               compact: true,
+              threadCount: conversations[index].count,
+              onTap: () => _open(
+                conversations[index].latest,
+                conversation: conversations[index].messages,
+              ),
             ),
           ),
         ),
@@ -1463,6 +1528,7 @@ class _MailHomeState extends State<MailHome>
     MailItem mail, {
     bool selected = false,
     bool compact = false,
+    int threadCount = 1,
     VoidCallback? onTap,
   }) {
     final selectedForAction = _selectedMessageIds.contains(mail.identity);
@@ -1494,7 +1560,7 @@ class _MailHomeState extends State<MailHome>
             label: 'Email from ${mail.sender}. ${mail.subject}. ${mail.time}',
             child: Padding(
             padding: compact
-                ? const EdgeInsets.symmetric(horizontal: 6, vertical: 12)
+                ? const EdgeInsets.symmetric(horizontal: 8, vertical: 10)
                 : const EdgeInsets.all(15),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1502,13 +1568,13 @@ class _MailHomeState extends State<MailHome>
                 CircleAvatar(
                   radius: compact ? 20 : 22,
                   backgroundColor: mail.unread
-                      ? const Color(0xFF633522)
-                      : const Color(0xFF30363A),
+                      ? _orange.withValues(alpha: .17)
+                      : _muted.withValues(alpha: .15),
                   child: Text(
                     mail.sender.trim().isEmpty
                         ? '?'
                         : mail.sender.trim()[0].toUpperCase(),
-                    style: const TextStyle(fontWeight: FontWeight.w800),
+                    style: const TextStyle(fontWeight: FontWeight.w800, color: _orange),
                   ),
                 ),
                 const SizedBox(width: 13),
@@ -1527,13 +1593,13 @@ class _MailHomeState extends State<MailHome>
                                 fontWeight: mail.unread
                                     ? FontWeight.w800
                                     : FontWeight.w600,
-                                fontSize: compact ? 14 : null,
+                                fontSize: compact ? 13 : null,
                               ),
                             ),
                           ),
                           Text(
-                            mail.time,
-                            style: const TextStyle(color: _muted, fontSize: 11),
+                             mail.sentAt == null ? mail.time : formatInboxTimestamp(mail.sentAt!),
+                             style: const TextStyle(color: _muted, fontSize: 11),
                           ),
                         ],
                       ),
@@ -1550,6 +1616,17 @@ class _MailHomeState extends State<MailHome>
                         ),
                       ),
                       const SizedBox(height: 4),
+                      if (threadCount > 1)
+
+                        Padding(
+
+                          padding: const EdgeInsets.only(top: 4),
+
+                          child: Text('$threadCount messages',
+
+                            style: const TextStyle(color: _orange, fontSize: 11, fontWeight: FontWeight.w700)),
+
+                        ),
                       Text(
                         mail.body,
                         maxLines: compact ? 1 : 2,
@@ -1586,7 +1663,7 @@ class _MailHomeState extends State<MailHome>
       background: Container(
         alignment: Alignment.centerLeft,
         padding: const EdgeInsets.symmetric(horizontal: 24),
-        color: const Color(0xFF168A73),
+        color: const Color(0xFF258773),
         child: const Icon(Icons.mark_email_read_rounded, color: Colors.white),
       ),
       secondaryBackground: Container(
@@ -1831,6 +1908,21 @@ class _MailHomeState extends State<MailHome>
               }
             },
           ),
+          if (Platform.isAndroid) ListTile(
+            leading: Icon(_liveSyncRunning ? Icons.notifications_active_rounded : Icons.sync_lock_rounded),
+            title: const Text('Fast background mail sync'),
+            subtitle: Text(_liveSyncEnabled
+                ? '2-minute checks with ongoing notification; Android may pause the service'
+                : 'Off · periodic Android checks (15+ minutes)'),
+            trailing: Switch(value: _liveSyncEnabled, onChanged: _accounts.isEmpty ? null : (_) {
+              Navigator.pop(context);
+              unawaited(_toggleLiveSync());
+            }),
+            onTap: _accounts.isEmpty ? null : () {
+              Navigator.pop(context);
+              unawaited(_toggleLiveSync());
+            },
+          ),
           const Divider(),
           ListTile(leading: const Icon(Icons.lock_outline), title: const Text('Export encrypted backup'), onTap: () { Navigator.pop(context); _exportBackup(); }),
           ListTile(leading: const Icon(Icons.settings_backup_restore_outlined), title: const Text('Import backup'), onTap: () { Navigator.pop(context); _importBackup(); }),
@@ -1979,6 +2071,16 @@ class _MailHomeState extends State<MailHome>
     if (_accounts.isNotEmpty) {
       await _loadFolders();
       await _refresh();
+    } else if (Platform.isAndroid) {
+      await AndroidMailBackgroundSync.cancel();
+      await LiveMailService.stop();
+      await _vault.writeLiveSyncEnabled(false);
+      if (mounted) {
+        setState(() {
+          _liveSyncEnabled = false;
+          _liveSyncRunning = false;
+        });
+      }
     }
   }
 }
@@ -1990,9 +2092,10 @@ class AddAccountPage extends StatefulWidget {
 }
 
 class MailDetailPage extends StatelessWidget {
-  const MailDetailPage({super.key, required this.message, this.account, this.service, this.folders = const [], this.onAction, this.onMove, this.onSent});
+  const MailDetailPage({super.key, required this.message, this.conversation = const [], this.account, this.service, this.folders = const [], this.onAction, this.onMove, this.onSent});
 
   final MailItem message;
+  final List<MailItem> conversation;
   final MailAccount? account;
   final CpanelMailService? service;
   final List<MailFolder> folders;
@@ -2003,7 +2106,7 @@ class MailDetailPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Text('Message'),
+      title: Text(conversation.length > 1 ? 'Conversation (${conversation.length})' : 'Message'),
       actions: [PopupMenuButton<String>(onSelected: (action) async {
         if (action == 'move') {
           final target = await showModalBottomSheet<MailFolder>(context: context, showDragHandle: true, builder: (ctx) => SafeArea(child: ListView(shrinkWrap: true, children: [for (final folder in folders.where((f) => f.path != message.mailboxPath)) ListTile(leading: const Icon(Icons.folder_outlined), title: Text(folder.name), onTap: () => Navigator.pop(ctx, folder))])));
@@ -2035,6 +2138,19 @@ class MailDetailPage extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 20),
+          if (conversation.length > 1) ...[
+            for (final earlier in conversation.where((m) => m.identity != message.identity))
+              Card(
+                margin: const EdgeInsets.only(bottom: 8),
+                child: ExpansionTile(
+                  title: Text(earlier.sender, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  subtitle: Text(earlier.body, maxLines: 1, overflow: TextOverflow.ellipsis),
+                  trailing: Text(earlier.time, style: const TextStyle(fontSize: 10, color: _muted)),
+                  children: [Padding(padding: const EdgeInsets.all(16), child: SelectableText(earlier.body))],
+                ),
+              ),
+            const SizedBox(height: 12),
+          ],
           Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -2086,17 +2202,21 @@ class MailDetailPage extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           Wrap(spacing: 10, runSpacing: 10, children: [
-            FilledButton.icon(onPressed: account == null || service == null ? null : () => _compose(context, account!, service!, to: message.senderAddress, subject: message.subject.toLowerCase().startsWith('re:') ? message.subject : 'Re: ${message.subject}', body: '\n\nOn ${message.time}, ${message.sender} wrote:\n> ${message.body.replaceAll('\n', '\n> ')}'), icon: const Icon(Icons.reply_rounded), label: const Text('Reply')),
+            FilledButton.icon(onPressed: account == null || service == null ? null : () => _compose(context, account!, service!, to: message.senderAddress, subject: message.subject.toLowerCase().startsWith('re:') ? message.subject : 'Re: ${message.subject}', body: '\n\nOn ${message.time}, ${message.sender} wrote:\n> ${message.body.replaceAll('\n', '\n> ')}', inReplyTo: message.messageId, references: message.references), icon: const Icon(Icons.reply_rounded), label: const Text('Reply')),
             OutlinedButton.icon(onPressed: account == null || service == null ? null : () => _compose(context, account!, service!, subject: 'Fwd: ${message.subject}', body: '\n\n---------- Forwarded message ----------\nFrom: ${message.senderAddress}\nDate: ${message.time}\nSubject: ${message.subject}\n\n${message.body}'), icon: const Icon(Icons.forward_rounded), label: const Text('Forward')),
             OutlinedButton.icon(onPressed: () => _print(context), icon: const Icon(Icons.print_outlined), label: const Text('Print')),
           ]),
+          if (account != null && service != null) ...[
+            const SizedBox(height: 18),
+            InlineReplyBox(account: account!, mailService: service!, message: message, onSent: onSent),
+          ],
         ],
       ),
     ),
   );
 
-  Future<void> _compose(BuildContext context, MailAccount account, CpanelMailService service, {String to = '', String subject = '', String body = ''}) async {
-    final sent = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => ComposePage(account: account, service: service, initialTo: to, initialSubject: subject, initialBody: body)));
+  Future<void> _compose(BuildContext context, MailAccount account, CpanelMailService service, {String to = '', String subject = '', String body = '', String? inReplyTo, String? references}) async {
+    final sent = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => ComposePage(account: account, service: service, initialTo: to, initialSubject: subject, initialBody: body, inReplyTo: inReplyTo, references: references)));
     if (sent == true) await onSent?.call();
   }
 
@@ -2274,12 +2394,14 @@ class _AddAccountPageState extends State<AddAccountPage> {
 }
 
 class ComposePage extends StatefulWidget {
-  const ComposePage({super.key, required this.account, required this.service, this.initialTo = '', this.initialSubject = '', this.initialBody = ''});
+  const ComposePage({super.key, required this.account, required this.service, this.initialTo = '', this.initialSubject = '', this.initialBody = '', this.inReplyTo, this.references});
   final MailAccount account;
   final CpanelMailService service;
   final String initialTo;
   final String initialSubject;
   final String initialBody;
+  final String? inReplyTo;
+  final String? references;
   @override
   State<ComposePage> createState() => _ComposePageState();
 }
@@ -2431,6 +2553,8 @@ class _ComposePageState extends State<ComposePage> {
         subject: _subject.text.trim(),
         body: _body.text,
         attachments: List<OutgoingMailAttachment>.of(_attachments),
+        inReplyTo: widget.inReplyTo,
+        references: widget.references,
       );
       if (mounted) Navigator.pop(context, true);
     } catch (e) {

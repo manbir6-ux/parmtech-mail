@@ -29,6 +29,7 @@ class AndroidMailBackgroundSync {
       _uniqueMailSyncTask,
       _mailSyncTask,
       frequency: const Duration(minutes: 15),
+      existingWorkPolicy: ExistingPeriodicWorkPolicy.keep,
       initialDelay: const Duration(minutes: 5),
       constraints: Constraints(networkType: NetworkType.connected),
     );

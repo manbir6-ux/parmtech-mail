@@ -104,3 +104,13 @@ String htmlMailToText(String html) {
       .replaceAll(RegExp(r'[ \t]{2,}'), ' ')
       .trim();
 }
+
+
+/// Compact inbox date + clock. The full timestamp is still shown in details.
+String formatInboxTimestamp(DateTime timestamp) {
+  final local = timestamp.toLocal();
+  final hour = local.hour % 12 == 0 ? 12 : local.hour % 12;
+  final minute = local.minute.toString().padLeft(2, '0');
+  final period = local.hour < 12 ? 'AM' : 'PM';
+  return '${local.day}/${local.month} · $hour:$minute $period';
+}

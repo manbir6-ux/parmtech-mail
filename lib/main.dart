@@ -611,7 +611,7 @@ class _MailHomeState extends State<MailHome>
         if (_folders.any((folder) => folder.path != message.mailboxPath && !_isSystemFolder(folder)))
           ListTile(leading: const Icon(Icons.drive_file_move_outline), title: const Text('Move to folder'), onTap: () => Navigator.pop(ctx, 'move')),
         ListTile(leading: const Icon(Icons.report_gmailerrorred_outlined), title: const Text('Mark as spam'), onTap: () => Navigator.pop(ctx, 'spam')),
-        ListTile(leading: const Icon(Icons.person_remove_outlined), title: Text('Delete all from ${message.sender}'), onTap: () => Navigator.pop(ctx, 'sender')),
+        ListTile(leading: const Icon(Icons.person_remove_outlined), title: Text('Delete loaded messages from ${message.sender}'), onTap: () => Navigator.pop(ctx, 'sender')),
       ])),
     );
     if (action == 'select') {
@@ -620,6 +620,19 @@ class _MailHomeState extends State<MailHome>
       final sameSender = message.senderAddress.trim().isEmpty
           ? <MailItem>[message]
           : _messages.where((m) => m.senderAddress.toLowerCase() == message.senderAddress.toLowerCase()).toList();
+      if (!mounted) return;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Delete sender messages?'),
+          content: Text('This deletes ${sameSender.length} currently loaded message(s) from ${message.sender}. Other server messages are not included.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted || _accounts.isEmpty) return;
       try {
         await _service.deleteMessages(_accounts[_active], sameSender);
         if (mounted) setState(() { _messages.removeWhere((m) => sameSender.any((item) => item.identity == m.identity)); _selectedMessageIds.removeAll(sameSender.map((m) => m.identity)); });
@@ -658,6 +671,18 @@ class _MailHomeState extends State<MailHome>
   Future<void> _bulkDelete() async {
     final selected = _messages.where((m) => _selectedMessageIds.contains(m.identity)).toList();
     if (selected.isEmpty || _accounts.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete selected messages?'),
+        content: Text('Move ${selected.length} message(s) to Trash, or permanently delete them if this server has no Trash folder?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted || _accounts.isEmpty) return;
     try {
       await _service.deleteMessages(_accounts[_active], selected);
       if (mounted) setState(() { _messages.removeWhere((m) => _selectedMessageIds.contains(m.identity)); _selectedMessageIds.clear(); });
@@ -1625,8 +1650,8 @@ class _MailHomeState extends State<MailHome>
 
   Widget _drawer() => Drawer(
     child: SafeArea(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: ListView(
+        padding: EdgeInsets.zero,
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
@@ -1752,7 +1777,6 @@ class _MailHomeState extends State<MailHome>
           const Divider(),
           ListTile(leading: const Icon(Icons.lock_outline), title: const Text('Export encrypted backup'), onTap: () { Navigator.pop(context); _exportBackup(); }),
           ListTile(leading: const Icon(Icons.settings_backup_restore_outlined), title: const Text('Import backup'), onTap: () { Navigator.pop(context); _importBackup(); }),
-          const Spacer(),
           const Padding(
             padding: EdgeInsets.all(22),
             child: Text(

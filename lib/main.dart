@@ -11,6 +11,7 @@ import 'package:window_manager/window_manager.dart';
 import 'data/background/mail_background_sync.dart';
 import 'data/background/live_mail_service.dart';
 import 'data/accounts/mail_account.dart';
+import 'data/appearance/mail_appearance.dart';
 import 'data/accounts/secure_account_vault.dart';
 import 'data/backup/encrypted_mail_backup.dart';
 import 'data/mail/cpanel_mail_service.dart';
@@ -34,12 +35,45 @@ Future<void> main() async {
   runApp(const ParmMailApp());
 }
 
-bool _darkTheme = false;
-Color get _ink => _darkTheme ? const Color(0xFF0C1323) : const Color(0xFFF4F6FB);
-Color get _panel => _darkTheme ? const Color(0xFF182238) : Colors.white;
+MailAppearance _activeAppearance = const MailAppearance();
+bool get _darkTheme => _activeAppearance.palette.isDark;
+Color get _ink => _activeAppearance.palette.background;
+Color get _panel => _activeAppearance.palette.surface;
 const _orange = Color(0xFF5066E9);
 const _sky = Color(0xFF08A7C7);
 const _muted = Color(0xFF78869B);
+
+ThemeData _mailTheme(Brightness brightness) {
+  final palette = _activeAppearance.palette;
+  final scheme = ColorScheme.fromSeed(
+    seedColor: palette.accent,
+    brightness: brightness,
+    surface: palette.surface,
+  );
+  return ThemeData(
+    useMaterial3: true,
+    brightness: brightness,
+    scaffoldBackgroundColor: palette.background,
+    colorScheme: scheme,
+    fontFamily: _activeAppearance.font.family,
+    appBarTheme: AppBarTheme(backgroundColor: palette.background, elevation: 0),
+    textTheme: const TextTheme(
+      headlineLarge: TextStyle(fontWeight: FontWeight.w900, letterSpacing: -1.2),
+      headlineSmall: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -.6),
+      titleLarge: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -.4),
+      titleMedium: TextStyle(fontWeight: FontWeight.w700, letterSpacing: -.25),
+      bodyMedium: TextStyle(fontSize: 14, height: 1.35),
+    ),
+    inputDecorationTheme: InputDecorationTheme(
+      filled: true,
+      fillColor: palette.surface,
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(16),
+        borderSide: BorderSide.none,
+      ),
+    ),
+  );
+}
 
 class ParmMailApp extends StatefulWidget {
   const ParmMailApp({super.key});
@@ -49,74 +83,49 @@ class ParmMailApp extends StatefulWidget {
 }
 
 class _ParmMailAppState extends State<ParmMailApp> {
-  void _toggleTheme() => setState(() {
-    _darkTheme = !_darkTheme;
-  });
+  final _appearanceStore = MailAppearanceStore();
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_restoreAppearance());
+  }
+
+  Future<void> _restoreAppearance() async {
+    final saved = await _appearanceStore.load();
+    if (!mounted) return;
+    setState(() => _activeAppearance = saved);
+  }
+
+  void _changeAppearance(MailAppearance value) {
+    setState(() => _activeAppearance = value);
+    unawaited(_appearanceStore.save(value));
+  }
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'Parmtech Mail',
+    title: 'ParmTech Mail',
     debugShowCheckedModeBanner: false,
     themeMode: _darkTheme ? ThemeMode.dark : ThemeMode.light,
-    theme: ThemeData(
-      useMaterial3: true,
-      brightness: Brightness.light,
-      scaffoldBackgroundColor: _ink,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: _orange,
-        brightness: Brightness.light,
-        surface: _panel,
-      ),
-      appBarTheme: AppBarTheme(backgroundColor: _ink, elevation: 0),
-      textTheme: const TextTheme(
-        headlineLarge: TextStyle(fontWeight: FontWeight.w900, letterSpacing: -1.2),
-        headlineSmall: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -.6),
-        titleLarge: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -.4),
-        titleMedium: TextStyle(fontWeight: FontWeight.w700, letterSpacing: -.25),
-        bodyMedium: TextStyle(fontSize: 14, height: 1.35),
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: _panel,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: BorderSide.none,
-        ),
-      ),
+    theme: _mailTheme(Brightness.light),
+    darkTheme: _mailTheme(Brightness.dark),
+    home: MailHome(
+      appearance: _activeAppearance,
+      onAppearanceChanged: _changeAppearance,
     ),
-    darkTheme: ThemeData(
-      useMaterial3: true,
-      brightness: Brightness.dark,
-      scaffoldBackgroundColor: _ink,
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: _orange,
-        brightness: Brightness.dark,
-        surface: _panel,
-      ),
-      appBarTheme: AppBarTheme(backgroundColor: _ink, elevation: 0),
-      textTheme: const TextTheme(
-        headlineLarge: TextStyle(fontWeight: FontWeight.w900, letterSpacing: -1.2),
-        headlineSmall: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -.6),
-        titleLarge: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -.4),
-        titleMedium: TextStyle(fontWeight: FontWeight.w700, letterSpacing: -.25),
-        bodyMedium: TextStyle(fontSize: 14, height: 1.35),
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: _panel,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(16),
-          borderSide: BorderSide.none,
-        ),
-      ),
-    ),
-    home: MailHome(onThemeToggle: _toggleTheme),
   );
 }
 
 class MailHome extends StatefulWidget {
-  const MailHome({super.key, required this.onThemeToggle});
-  final VoidCallback onThemeToggle;
+  const MailHome({
+    super.key,
+    required this.appearance,
+    required this.onAppearanceChanged,
+  });
+
+  final MailAppearance appearance;
+  final ValueChanged<MailAppearance> onAppearanceChanged;
+
   @override
   State<MailHome> createState() => _MailHomeState();
 }
@@ -2041,8 +2050,8 @@ class _MailHomeState extends State<MailHome>
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
         builder: (_) => MailSettingsPage(
-          darkTheme: _darkTheme,
-          onThemeToggle: widget.onThemeToggle,
+          appearance: widget.appearance,
+          onAppearanceChanged: widget.onAppearanceChanged,
           accountEmails: _accounts.map((a) => a.email).toList(),
           onAddAccount: () async {
             Navigator.of(context).pop();

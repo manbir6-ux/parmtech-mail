@@ -1005,6 +1005,8 @@ class _MailHomeState extends State<MailHome>
                     setState(() {
                       _folderPath = 'INBOX';
                       _messages = [];
+                      _selectedMail = null;
+                      _selectedMessageIds.clear();
                     });
                     _refresh();
                   },
@@ -1061,6 +1063,8 @@ class _MailHomeState extends State<MailHome>
                         _folderPath = 'INBOX';
                         _messages = [];
                         _selectedMail = null;
+                    _folders = const [];
+                    _selectedMessageIds.clear();
                       });
                       _loadFolders().then((_) => _refresh());
                     },
@@ -1770,6 +1774,8 @@ class _MailHomeState extends State<MailHome>
                   _folderPath = 'INBOX';
                   _messages = [];
                   _selectedMail = null;
+                    _folders = const [];
+                    _selectedMessageIds.clear();
                 });
                 Navigator.pop(context);
                 _loadFolders().then((_) => _refresh());
@@ -1825,8 +1831,8 @@ class _MailHomeState extends State<MailHome>
     builder: (ctx) => SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+        child: ListView(
+          shrinkWrap: true,
           children: [
             const Align(
               alignment: Alignment.centerLeft,
@@ -1852,6 +1858,8 @@ class _MailHomeState extends State<MailHome>
                     _folderPath = 'INBOX';
                     _messages = [];
                     _selectedMail = null;
+                    _folders = const [];
+                    _selectedMessageIds.clear();
                   });
                   Navigator.pop(ctx);
                   _loadFolders().then((_) => _refresh());

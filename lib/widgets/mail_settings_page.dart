@@ -170,12 +170,14 @@ class _SettingsPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return Container(
+    return Material(
       clipBehavior: Clip.antiAlias,
-      decoration: BoxDecoration(
-        color: colors.surface,
+      color: colors.surface,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(17),
-        border: Border.all(color: colors.outlineVariant.withValues(alpha: .5)),
+        side: BorderSide(
+          color: colors.outlineVariant.withValues(alpha: .5),
+        ),
       ),
       child: Column(children: children),
     );

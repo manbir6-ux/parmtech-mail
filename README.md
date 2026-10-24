@@ -5,6 +5,7 @@ Private, cross-platform mail client for ParmTech-hosted cPanel mailboxes, built 
 ## Current implementation
 
 - Dark/light premium inbox, responsive desktop split-pane layout, scrollable mobile folders, single private IMAP/SMTP server and multiple-file compose.
+- Six saved visual palettes (Pearl, Frost, Sand, Midnight, Graphite, Nebula), three light and three dark; six device-offline font styles; and three responsive inbox layouts (Comfort, Compact, Cards). Appearance is stored on-device and can be changed from Settings.
 - Secure IMAP (993) and SMTP (465) use only `premium214.web-hosting.com` for every email domain. TLS certificate validation is mandatory and has no insecure bypass. A mailbox must exist and authenticate successfully on that private server.
 - Email + password account setup, with a maximum of 10 accounts.
 - Server-reported folders with Spam/Junk alias de-duplication, custom folder creation, local inbox search, explicit account removal and foreground sync alerts.
@@ -34,6 +35,10 @@ python3 tool/prepare_macos.py
 flutter pub get
 flutter run
 ```
+
+## CI artifacts
+
+The `ParmTech Mail APK and Appetize builds` GitHub Actions workflow checks Flutter analysis/tests, builds an Android release APK, and then produces an unsigned iOS Simulator `.app` inside a ZIP for Appetize.io. Android Appetize accepts APK directly; iOS requires a simulator `.app` ZIP, not an IPA. GitHub Actions artifacts may be ZIP-wrapped downloads, so extract the inner app ZIP before uploading to Appetize. Permanent APK upgrade signing requires four `ANDROID_*` repository secrets; otherwise the default temporary debug key changes between CI runners.
 
 ## Build locally
 

@@ -2,6 +2,20 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:parm_mail/data/backup/encrypted_mail_backup.dart';
 
 void main() {
+  test('rejects empty or oversized backup before key derivation', () async {
+    await expectLater(
+      EncryptedMailBackup.decrypt([], 'long backup password'),
+      throwsA(isA<FormatException>()),
+    );
+    await expectLater(
+      EncryptedMailBackup.decrypt(
+        List<int>.filled(EncryptedMailBackup.maxBackupBytes + 1, 0),
+        'long backup password',
+      ),
+      throwsA(isA<FormatException>()),
+    );
+  });
+
   test('encrypted backups round-trip and reject a wrong passphrase', () async {
     final original = <String, Object?>{
       'accounts': [{'email': 'hello@example.com', 'password': 'secret'}],

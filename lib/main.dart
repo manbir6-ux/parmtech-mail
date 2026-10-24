@@ -1614,6 +1614,7 @@ class _MailHomeState extends State<MailHome>
           }
         },
         onLongPress: () => setState(() { _selectedMessageIds.add(mail.identity); }),
+        onSecondaryTap: () => _showMailActions(mail),
         child: Semantics(
           button: true,
           label: 'Email from ${mail.sender}. ${mail.subject}. ${mail.time}',

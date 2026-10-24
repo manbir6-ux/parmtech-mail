@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:parm_mail/data/backup/encrypted_mail_backup.dart';
 
@@ -9,7 +11,7 @@ void main() {
     );
     await expectLater(
       EncryptedMailBackup.decrypt(
-        List<int>.filled(EncryptedMailBackup.maxBackupBytes + 1, 0),
+        Uint8List(EncryptedMailBackup.maxBackupBytes + 1),
         'long backup password',
       ),
       throwsA(isA<FormatException>()),

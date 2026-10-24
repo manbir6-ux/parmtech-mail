@@ -266,14 +266,31 @@ class _MailHomeState extends State<MailHome>
     try {
       final saved = await _vault.readAll();
       _lastUnreadByEmail.addAll(await _vault.readUnreadCounts());
+      // Render the last encrypted Inbox cache immediately. Network discovery
+      // and IMAP sync happen afterwards and must never block the first screen.
+      var cachedInbox = <MailItem>[];
+      if (saved.isNotEmpty) {
+        try {
+          final raw = await _vault.readMailCache(saved.first.id, 'INBOX');
+          if (raw != null) {
+            cachedInbox = (jsonDecode(raw) as List<dynamic>)
+                .map((entry) => MailItem.fromJson(entry as Map<String, dynamic>))
+                .toList(growable: true);
+          }
+        } catch (_) {
+          // Ignore corrupt local cache, then fetch fresh messages.
+        }
+      }
       if (!mounted) return;
       setState(() {
         _accounts = saved;
+        _messages = cachedInbox;
+        _selectedMail = cachedInbox.isEmpty ? null : cachedInbox.first;
         _loading = false;
       });
       if (saved.isNotEmpty) {
-        await _loadFolders();
-        await _refresh();
+        unawaited(_loadFolders());
+        unawaited(_refresh());
         unawaited(_seedUnreadCounts());
       } else if (Platform.isAndroid) {
         try {

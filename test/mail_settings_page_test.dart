@@ -20,9 +20,6 @@ void main() {
     ));
 
     expect(find.text('Settings'), findsOneWidget);
-    expect(find.text('Export encrypted backup'), findsOneWidget);
-    expect(find.text('Import backup'), findsOneWidget);
-    expect(find.text('Connect another account'), findsOneWidget);
     expect(find.text('Enable new-mail alerts'), findsNothing);
     expect(find.text('Fast background mail sync'), findsNothing);
     expect(find.byType(Switch), findsNothing);
@@ -33,6 +30,15 @@ void main() {
     await tester.tap(darkTheme);
     await tester.pumpAndSettle();
     expect(prefs.palette, MailPalette.midnight);
+
+    // Appearance options make the settings list taller. Lazy list children
+    // only exist after scrolling, so find the lower settings deliberately.
+    await tester.scrollUntilVisible(find.text('Connect another account'), 240);
+    expect(find.text('Connect another account'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Export encrypted backup'), 240);
+    expect(find.text('Export encrypted backup'), findsOneWidget);
+    await tester.scrollUntilVisible(find.text('Import backup'), 200);
+    expect(find.text('Import backup'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

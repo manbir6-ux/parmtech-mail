@@ -382,37 +382,57 @@ class _MailHomeState extends State<MailHome>
     if (!mounted || _accounts.isEmpty || _syncing) return;
     final accounts = List<MailAccount>.of(_accounts);
     final activeAccountId = _accounts[_active].id;
+    var newMailCount = 0;
     setState(() => _syncing = true);
     try {
-      for (final account in accounts) {
-        try {
-          final isActiveInbox = account.id == activeAccountId &&
-              _folderPath.toUpperCase() == 'INBOX';
-          final items = isActiveInbox ? await _service.fetchInbox(account) : null;
-          final unread = await _service.countUnread(account);
-          if (!_accounts.any((saved) => saved.id == account.id)) continue;
-          final previous = _lastUnreadByEmail[account.id];
-          _lastUnreadByEmail[account.id] = unread;
-          if (previous != null && unread > previous) {
-            try {
-              await _notifications.showNewMail(unread - previous);
-            } catch (_) {}
-          }
-          if (items != null &&
-              mounted &&
-              _accounts.isNotEmpty &&
-              _accounts[_active].id == account.id &&
-              _folderPath.toUpperCase() == 'INBOX') {
-            setState(() {
-              _messages = items;
-              _selectedMail = items.where((m) => m.identity == _selectedMail?.identity).firstOrNull ??
+      // Bound concurrency to two accounts: much faster across several
+      // mailboxes without overwhelming a cPanel shared-hosting server.
+      for (var start = 0; start < accounts.length; start += 2) {
+        await Future.wait(accounts.skip(start).take(2).map((account) async {
+          try {
+            final unread = await _service.countUnread(account);
+            if (!mounted || !_accounts.any((saved) => saved.id == account.id)) {
+              return;
+            }
+            final previous = _lastUnreadByEmail[account.id];
+            _lastUnreadByEmail[account.id] = unread;
+            if (previous != null && unread > previous) {
+              newMailCount += unread - previous;
+            }
+            final isActiveInbox = account.id == activeAccountId &&
+                _accounts.isNotEmpty &&
+                _accounts[_active].id == account.id &&
+                _folderPath.toUpperCase() == 'INBOX';
+            if (isActiveInbox) {
+              final items = await _service.fetchInbox(account);
+              if (!mounted ||
+                  !_accounts.any((saved) => saved.id == account.id)) return;
+              await _vault.writeMailCache(account.id, 'INBOX',
+                  jsonEncode(items.map((item) => item.toJson()).toList()));
+              if (!mounted ||
+                  _accounts.isEmpty ||
+                  _accounts[_active].id != account.id ||
+                  _folderPath.toUpperCase() != 'INBOX') return;
+              setState(() {
+                _messages = items;
+                _selectedMail = items
+                        .where((item) => item.identity == _selectedMail?.identity)
+                        .firstOrNull ??
                     (items.isEmpty ? null : items.first);
-            });
+              });
+            }
+          } catch (_) {
+            // Retain the previous unread snapshot until a successful poll.
           }
-        } catch (_) {
-          // A temporary connection failure is retried at the next poll.
-        }
+        }));
       }
+      if (newMailCount > 0) {
+        try {
+          await _notifications.showNewMail(newMailCount);
+        } catch (_) {}
+      }
+      final activeIds = _accounts.map((account) => account.id).toSet();
+      _lastUnreadByEmail.removeWhere((id, _) => !activeIds.contains(id));
       await _vault.writeUnreadCounts(_lastUnreadByEmail);
     } finally {
       if (mounted) {

@@ -102,7 +102,11 @@ class CpanelMailService {
         email: account.email.trim(),
         password: account.password,
         imapHost: session.host,
-        smtpHost: session.host,
+        // Preserve a separately configured outgoing server. For automatic
+        // single-host setup, follow the verified IMAP hostname.
+        smtpHost: account.smtpHost.trim() == account.imapHost.trim()
+            ? session.host
+            : account.smtpHost.trim(),
         displayName: account.displayName,
       );
     } finally {
@@ -329,10 +333,14 @@ class CpanelMailService {
     required String subject,
     required String body,
   }) async {
+    if (!model.isValidMailAddress(to)) {
+      throw const MailConnectionException('Enter a valid recipient email address.');
+    }
     final candidates = <String>{
+      account.smtpHost.trim(),
+      account.imapHost.trim(),
       ...model.cPanelHostCandidates(account.email).map((e) => e.host),
-      account.smtpHost,
-    };
+    }.where((host) => host.isNotEmpty);
     final connectionErrors = <String>[];
 
     for (final host in candidates) {
@@ -410,8 +418,8 @@ class CpanelMailService {
 
   Future<_ImapSession> _connectAndLogin(model.MailAccount account) async {
     final hosts = <String>{
+      account.imapHost.trim(),
       ...model.cPanelHostCandidates(account.email).map((candidate) => candidate.host),
-      account.imapHost,
     }.where((host) => host.trim().isNotEmpty);
     final connectionErrors = <String>[];
 

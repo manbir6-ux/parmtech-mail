@@ -60,8 +60,8 @@ List<MailServerCandidate> cPanelHostCandidates(String email) {
       MailServerCandidate('parmtech.au'),
     ];
   }
-  if (const {'yahoo.com', 'yahoo.com.au', 'yahoo.co.uk', 'ymail.com',
-             'rocketmail.com'}.contains(domain)) {
+  if ((domain.startsWith('yahoo.') ||
+      const {'ymail.com', 'rocketmail.com'}.contains(domain))) {
     return const [MailServerCandidate('imap.mail.yahoo.com')];
   }
   if (const {'gmail.com', 'googlemail.com'}.contains(domain)) {
@@ -85,8 +85,8 @@ List<MailServerCandidate> cPanelHostCandidates(String email) {
 
 String recommendedSmtpHost(String email) {
   final domain = email.trim().split('@').last.toLowerCase();
-  if (const {'yahoo.com', 'yahoo.com.au', 'yahoo.co.uk', 'ymail.com',
-             'rocketmail.com'}.contains(domain)) return 'smtp.mail.yahoo.com';
+  if ((domain.startsWith('yahoo.') ||
+      const {'ymail.com', 'rocketmail.com'}.contains(domain))) return 'smtp.mail.yahoo.com';
   if (const {'gmail.com', 'googlemail.com'}.contains(domain)) {
     return 'smtp.gmail.com';
   }
@@ -100,8 +100,8 @@ String recommendedSmtpHost(String email) {
 
 String mailSetupHint(String email) {
   final domain = email.trim().split('@').last.toLowerCase();
-  if (const {'yahoo.com', 'yahoo.com.au', 'yahoo.co.uk', 'ymail.com',
-             'rocketmail.com', 'aol.com'}.contains(domain)) {
+  if ((domain.startsWith('yahoo.') ||
+      const {'ymail.com', 'rocketmail.com', 'aol.com'}.contains(domain))) {
     return 'Yahoo/AOL accounts usually need an App Password from the '
         'provider account-security page.';
   }
@@ -111,6 +111,10 @@ String mailSetupHint(String email) {
   }
   if (const {'icloud.com', 'me.com', 'mac.com'}.contains(domain)) {
     return 'iCloud Mail requires an app-specific password for this mail client.';
+  }
+  if (const {'outlook.com', 'hotmail.com', 'live.com', 'office365.com'}.contains(domain)) {
+    return 'Microsoft mail accounts normally require OAuth sign-in. '
+        'This app currently supports password-based IMAP only.';
   }
   return 'For cPanel mail: Email Accounts → Connect Devices → Secure SSL/TLS '
       'Settings. Copy the exact incoming and outgoing server names shown there.';

@@ -46,7 +46,9 @@ class _MailSettingsPageState extends State<MailSettingsPage> {
   void _change(MailAppearance prefs) {
     if (_selected.palette == prefs.palette &&
         _selected.font == prefs.font &&
-        _selected.layout == prefs.layout) return;
+        _selected.layout == prefs.layout) {
+      return;
+    }
     setState(() => _selected = prefs);
     widget.onAppearanceChanged(prefs);
   }

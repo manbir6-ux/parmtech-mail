@@ -579,9 +579,9 @@ class _MailHomeState extends State<MailHome>
         } catch (_) {}
       }
       unawaited(_seedUnreadCounts());
+      unawaited(_activateAutomaticBackgroundMail());
       refreshAfterConnect = true;
       await _loadFolders();
-      unawaited(_activateAutomaticBackgroundMail());
     } catch (e) {
       if (mounted) _notice(friendlyMailError(e));
     } finally {
@@ -850,6 +850,7 @@ class _MailHomeState extends State<MailHome>
       }
       if (!mounted) return;
       setState(() { _accounts = byId.values.toList(); _active = 0; _folderPath = 'INBOX'; _messages = []; _folders = const []; });
+      unawaited(_activateAutomaticBackgroundMail());
       await _loadFolders();
       await _refresh();
       if (mounted) _notice('Backup restored on this device.');
@@ -881,7 +882,9 @@ class _MailHomeState extends State<MailHome>
             ),
             Text(
               account?.email ?? 'Your inbox',
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, letterSpacing: -.3),
             ),
           ],
         ),

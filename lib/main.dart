@@ -558,7 +558,7 @@ class _MailHomeState extends State<MailHome>
       return;
     }
     final account = await Navigator.of(context).push<MailAccount>(
-      MaterialPageRoute(builder: (_) => const AddAccountPage()),
+      MaterialPageRoute(builder: (_) => AddAccountPage(existingAccounts: _accounts)),
     );
     if (account == null || !mounted) return;
     var refreshAfterConnect = false;
@@ -2206,7 +2206,12 @@ class _MailHomeState extends State<MailHome>
 }
 
 class AddAccountPage extends StatefulWidget {
-  const AddAccountPage({super.key});
+  const AddAccountPage({super.key, this.existingAccounts = const []});
+
+  /// Already verified accounts on this device. Used for an opt-in,
+  /// password-free server preset when multiple domains share one cPanel host.
+  final List<MailAccount> existingAccounts;
+
   @override
   State<AddAccountPage> createState() => _AddAccountPageState();
 }
@@ -2455,10 +2460,56 @@ class _AddAccountPageState extends State<AddAccountPage> {
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 4),
                 child: Text(
-                  'Suggested: IMAP ${cPanelHostCandidates(_email.text).first.host} · SMTP ${recommendedSmtpHost(_email.text)}',
+                  'Server: IMAP ${_imapHost.text.trim().isEmpty ? cPanelHostCandidates(_email.text).first.host : _imapHost.text.trim()} · SMTP ${_smtpHost.text.trim().isEmpty ? recommendedSmtpHost(_email.text) : _smtpHost.text.trim()}',
                   style: const TextStyle(fontSize: 11, color: _orange),
                 ),
               ),
+            ],
+            if (reusableMailServers(widget.existingAccounts).isNotEmpty) ...[
+              const SizedBox(height: 16),
+              const Text(
+                'Use the same hosting server',
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
+              ),
+              const SizedBox(height: 5),
+              const Text(
+                'If this mailbox is hosted alongside a connected account, reuse its verified secure IMAP/SMTP hostnames. The password is never copied.',
+                style: TextStyle(fontSize: 12, color: _muted, height: 1.4),
+              ),
+              const SizedBox(height: 8),
+              for (final server in reusableMailServers(widget.existingAccounts))
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 7),
+                  child: OutlinedButton.icon(
+                    onPressed: _testing ? null : () {
+                      setState(() {
+                        _imapHost.text = server.imapHost;
+                        _smtpHost.text = server.smtpHost;
+                        _connectionError = null;
+                      });
+                    },
+                    icon: const Icon(Icons.dns_outlined, size: 19),
+                    label: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Use server from ${server.sourceEmail}',
+                            style: const TextStyle(fontWeight: FontWeight.w700),
+                          ),
+                          Text(
+                            server.imapHost == server.smtpHost
+                                ? server.imapHost
+                                : 'IMAP: ${server.imapHost} · SMTP: ${server.smtpHost}',
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12, color: _muted),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
             ],
             const SizedBox(height: 10),
             ExpansionTile(

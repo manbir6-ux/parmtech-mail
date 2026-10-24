@@ -17,6 +17,7 @@ import 'data/mail/cpanel_mail_service.dart';
 import 'data/mail/mail_conversations.dart';
 import 'data/mail/mail_presentation.dart';
 import 'widgets/inline_reply_box.dart';
+import 'widgets/mail_settings_page.dart';
 import 'data/notifications/mail_notifications.dart';
 
 Future<void> main() async {
@@ -127,8 +128,6 @@ class _MailHomeState extends State<MailHome>
   MailItem? _selectedMail;
   final Set<String> _selectedMessageIds = <String>{};
   bool _quitting = false;
-  bool _liveSyncEnabled = false;
-  bool _liveSyncRunning = false;
 
   @override
   void initState() {
@@ -267,7 +266,6 @@ class _MailHomeState extends State<MailHome>
     }
     try {
       final saved = await _vault.readAll();
-      final livePreference = Platform.isAndroid && await _vault.readLiveSyncEnabled();
       _lastUnreadByEmail.addAll(await _vault.readUnreadCounts());
       // Render the last encrypted Inbox cache immediately. Network discovery
       // and IMAP sync happen afterwards and must never block the first screen.
@@ -287,20 +285,12 @@ class _MailHomeState extends State<MailHome>
       if (!mounted) return;
       setState(() {
         _accounts = saved;
-        _liveSyncEnabled = livePreference;
         _messages = cachedInbox;
         _selectedMail = cachedInbox.isEmpty ? null : cachedInbox.first;
         _loading = false;
       });
       if (saved.isNotEmpty) {
-        if (Platform.isAndroid) {
-          unawaited(_scheduleAndroidBackgroundSync());
-          if (livePreference) {
-            unawaited(LiveMailService.start().then((started) {
-              if (mounted) setState(() => _liveSyncRunning = started);
-            }).catchError((Object _) {}));
-          }
-        }
+        unawaited(_activateAutomaticBackgroundMail());
         unawaited(_loadFolders());
         unawaited(_refresh());
         unawaited(_seedUnreadCounts());
@@ -408,51 +398,16 @@ class _MailHomeState extends State<MailHome>
     }
   }
 
-  Future<void> _toggleLiveSync() async {
+  /// Always schedule available Android checks for signed-in mail accounts.
+  /// On newer Android devices a foreground service is best-effort and may be
+  /// stopped by device battery restrictions. WorkManager remains the fallback.
+  Future<void> _activateAutomaticBackgroundMail() async {
     if (!Platform.isAndroid || _accounts.isEmpty) return;
+    await _scheduleAndroidBackgroundSync();
     try {
-      if (_liveSyncEnabled) {
-        await LiveMailService.stop();
-        await _vault.writeLiveSyncEnabled(false);
-        if (mounted) {
-        setState(() {
-          _liveSyncEnabled = false;
-          _liveSyncRunning = false;
-        });
-      }
-        if (mounted) {
-        _notice('2-minute live sync stopped. Android periodic checks remain enabled.');
-      }
-        return;
-      }
-      final allowed = await _notifications.requestPermission();
-      if (!allowed) {
-        if (mounted) {
-        _notice('Allow notifications in Android Settings to receive new mail alerts.');
-      }
-        return;
-      }
-      final started = await LiveMailService.start();
-      if (!started) {
-        if (mounted) {
-        _notice('Could not start live sync. Android may be blocking background services.');
-      }
-        return;
-      }
-      await _vault.writeLiveSyncEnabled(true);
-      if (mounted) {
-        setState(() {
-        _liveSyncEnabled = true;
-        _liveSyncRunning = true;
-      });
-      }
-      if (mounted) {
-        _notice('Live checks enabled, about every 2 minutes while Android permits.');
-      }
-    } catch (error) {
-      if (mounted) {
-        _notice('Live sync unavailable: $error');
-      }
+      await LiveMailService.start();
+    } catch (_) {
+      // WorkManager fallback is still active when Android blocks the service.
     }
   }
 
@@ -611,6 +566,7 @@ class _MailHomeState extends State<MailHome>
       unawaited(_seedUnreadCounts());
       refreshAfterConnect = true;
       await _loadFolders();
+      unawaited(_activateAutomaticBackgroundMail());
     } catch (e) {
       if (mounted) _notice(friendlyMailError(e));
     } finally {
@@ -941,15 +897,6 @@ class _MailHomeState extends State<MailHome>
             onPressed: _accountPicker,
             tooltip: 'Accounts',
             icon: const Icon(Icons.account_circle_outlined),
-          ),
-          IconButton(
-            onPressed: widget.onThemeToggle,
-            tooltip: _darkTheme
-                ? 'Switch to light mode'
-                : 'Switch to dark mode',
-            icon: Icon(
-              _darkTheme ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-            ),
           ),
           const SizedBox(width: 8),
         ],
@@ -1879,53 +1826,17 @@ class _MailHomeState extends State<MailHome>
                 _loadFolders().then((_) => _refresh());
               },
             ),
+          const Divider(height: 20),
           ListTile(
-            leading: const Icon(Icons.add_circle_outline),
-            title: const Text('Add another account'),
+            leading: const Icon(Icons.settings_rounded, color: _orange),
+            title: const Text('Settings',
+                style: TextStyle(fontWeight: FontWeight.w800)),
+            trailing: const Icon(Icons.chevron_right_rounded),
             onTap: () {
               Navigator.pop(context);
-              _addAccount();
+              _openSettings();
             },
           ),
-          ListTile(
-            leading: const Icon(Icons.notifications_active_outlined),
-            title: const Text('Enable new-mail alerts'),
-            onTap: () async {
-              Navigator.pop(context);
-              try {
-                final allowed = await _notifications.requestPermission();
-                if (mounted) {
-                  _notice(
-                    allowed
-                        ? Platform.isAndroid
-                              ? 'Alerts are on. Android checks for new mail in the background when the system allows.'
-                              : 'New-mail alerts are enabled for inbox syncs.'
-                        : 'Notification permission was not granted.',
-                  );
-                }
-              } catch (e) {
-                if (mounted) _notice(friendlyMailError(e));
-              }
-            },
-          ),
-          if (Platform.isAndroid) ListTile(
-            leading: Icon(_liveSyncRunning ? Icons.notifications_active_rounded : Icons.sync_lock_rounded),
-            title: const Text('Fast background mail sync'),
-            subtitle: Text(_liveSyncEnabled
-                ? '2-minute checks with ongoing notification; Android may pause the service'
-                : 'Off · periodic Android checks (15+ minutes)'),
-            trailing: Switch(value: _liveSyncEnabled, onChanged: _accounts.isEmpty ? null : (_) {
-              Navigator.pop(context);
-              unawaited(_toggleLiveSync());
-            }),
-            onTap: _accounts.isEmpty ? null : () {
-              Navigator.pop(context);
-              unawaited(_toggleLiveSync());
-            },
-          ),
-          const Divider(),
-          ListTile(leading: const Icon(Icons.lock_outline), title: const Text('Export encrypted backup'), onTap: () { Navigator.pop(context); _exportBackup(); }),
-          ListTile(leading: const Icon(Icons.settings_backup_restore_outlined), title: const Text('Import backup'), onTap: () { Navigator.pop(context); _importBackup(); }),
           const Padding(
             padding: EdgeInsets.all(22),
             child: Text(
@@ -1937,6 +1848,34 @@ class _MailHomeState extends State<MailHome>
       ),
     ),
   );
+
+  Future<void> _openSettings() async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => MailSettingsPage(
+          darkTheme: _darkTheme,
+          onThemeToggle: widget.onThemeToggle,
+          accountEmails: _accounts.map((a) => a.email).toList(),
+          onAddAccount: () async {
+            Navigator.of(context).pop();
+            await _addAccount();
+          },
+          onRemoveAccount: (index) async {
+            Navigator.of(context).pop();
+            await _removeAccount(index);
+          },
+          onExportBackup: () async {
+            Navigator.of(context).pop();
+            await _exportBackup();
+          },
+          onImportBackup: () async {
+            Navigator.of(context).pop();
+            await _importBackup();
+          },
+        ),
+      ),
+    );
+  }
 
   Future<void> _accountPicker() async => showModalBottomSheet<void>(
     context: context,
@@ -2074,13 +2013,6 @@ class _MailHomeState extends State<MailHome>
     } else if (Platform.isAndroid) {
       await AndroidMailBackgroundSync.cancel();
       await LiveMailService.stop();
-      await _vault.writeLiveSyncEnabled(false);
-      if (mounted) {
-        setState(() {
-          _liveSyncEnabled = false;
-          _liveSyncRunning = false;
-        });
-      }
     }
   }
 }

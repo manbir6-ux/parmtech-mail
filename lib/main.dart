@@ -625,6 +625,7 @@ class _MailHomeState extends State<MailHome>
         if (mounted) setState(() { _messages.removeWhere((m) => sameSender.any((item) => item.identity == m.identity)); _selectedMessageIds.removeAll(sameSender.map((m) => m.identity)); });
       } catch (e) { if (mounted) _notice(friendlyMailError(e)); }
     } else if (action == 'move') {
+      if (!mounted) return;
       final targets = _folders.where((folder) => folder.path != message.mailboxPath).toList();
       final target = await showModalBottomSheet<MailFolder>(context: context, showDragHandle: true, builder: (ctx) => SafeArea(child: ListView(shrinkWrap: true, children: [for (final folder in targets) ListTile(leading: Icon(_folderIcon(folder)), title: Text(_folderTitle(folder)), onTap: () => Navigator.pop(ctx, folder))])));
       if (target != null) {

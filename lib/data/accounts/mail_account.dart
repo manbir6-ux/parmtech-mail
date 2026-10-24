@@ -41,6 +41,43 @@ class MailAccount {
   );
 }
 
+/// Reuses the TLS hostnames of an account already verified on this device.
+/// An explicit user choice is required before applying these to another
+/// mailbox, since unrelated email domains may use different providers.
+class ReusableMailServer {
+  const ReusableMailServer({
+    required this.sourceEmail,
+    required this.imapHost,
+    required this.smtpHost,
+  });
+
+  final String sourceEmail;
+  final String imapHost;
+  final String smtpHost;
+}
+
+/// Deduplicated configurations from connected accounts. No passwords or
+/// inferred domain ownership are copied.
+List<ReusableMailServer> reusableMailServers(Iterable<MailAccount> accounts) {
+  final seen = <String>{};
+  final servers = <ReusableMailServer>[];
+  for (final account in accounts) {
+    final imap = account.imapHost.trim().toLowerCase();
+    final smtp = account.smtpHost.trim().toLowerCase();
+    if (!isValidMailServerHost(imap) || !isValidMailServerHost(smtp)) {
+      continue;
+    }
+    if (seen.add('$imap|$smtp')) {
+      servers.add(ReusableMailServer(
+        sourceEmail: account.email.trim(),
+        imapHost: imap,
+        smtpHost: smtp,
+      ));
+    }
+  }
+  return List<ReusableMailServer>.unmodifiable(servers);
+}
+
 class MailServerCandidate {
   const MailServerCandidate(this.host);
   final String host;

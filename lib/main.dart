@@ -9,10 +9,12 @@ import 'package:pdf/widgets.dart' as pw;
 import 'package:tray_manager/tray_manager.dart' as tray;
 import 'package:window_manager/window_manager.dart';
 import 'data/background/mail_background_sync.dart';
+import 'data/background/live_mail_service.dart';
 import 'data/accounts/mail_account.dart';
 import 'data/accounts/secure_account_vault.dart';
 import 'data/backup/encrypted_mail_backup.dart';
 import 'data/mail/cpanel_mail_service.dart';
+import 'data/mail/mail_conversations.dart';
 import 'data/notifications/mail_notifications.dart';
 
 Future<void> main() async {
@@ -21,6 +23,7 @@ Future<void> main() async {
   if (Platform.isAndroid) {
     try {
       await AndroidMailBackgroundSync.initialize();
+      await LiveMailService.configure();
     } catch (_) {
       // A scheduler issue should not prevent the mailbox UI from opening.
     }
@@ -28,12 +31,11 @@ Future<void> main() async {
   runApp(const ParmMailApp());
 }
 
-bool _darkTheme = true;
-Color get _ink =>
-    _darkTheme ? const Color(0xFF101719) : const Color(0xFFF3F7F6);
-Color get _panel => _darkTheme ? const Color(0xFF192224) : Colors.white;
-const _orange = Color(0xFF16B89A);
-const _muted = Color(0xFF788681);
+bool _darkTheme = false;
+Color get _ink => _darkTheme ? const Color(0xFF0F1624) : const Color(0xFFF6F8FC);
+Color get _panel => _darkTheme ? const Color(0xFF192438) : Colors.white;
+const _orange = Color(0xFF4F6FE8);
+const _muted = Color(0xFF8390A3);
 
 class ParmMailApp extends StatefulWidget {
   const ParmMailApp({super.key});
@@ -123,6 +125,8 @@ class _MailHomeState extends State<MailHome>
   MailItem? _selectedMail;
   final Set<String> _selectedMessageIds = <String>{};
   bool _quitting = false;
+  bool _liveSyncEnabled = false;
+  bool _liveSyncRunning = false;
 
   @override
   void initState() {
@@ -158,14 +162,10 @@ class _MailHomeState extends State<MailHome>
 
   Future<void> _resumeForegroundSync() async {
     _autoSyncTimer?.cancel();
-    if (Platform.isAndroid) {
-      try {
-        await AndroidMailBackgroundSync.cancel();
-      } catch (_) {}
-    }
+    if (Platform.isAndroid) unawaited(_scheduleAndroidBackgroundSync());
     if (!_quitting && mounted && _accounts.isNotEmpty) {
       _autoSyncTimer = Timer.periodic(
-        const Duration(minutes: 5),
+        const Duration(minutes: 2),
         (_) => unawaited(_autoCheckInboxes()),
       );
     }
@@ -265,6 +265,7 @@ class _MailHomeState extends State<MailHome>
     }
     try {
       final saved = await _vault.readAll();
+      final livePreference = Platform.isAndroid && await _vault.readLiveSyncEnabled();
       _lastUnreadByEmail.addAll(await _vault.readUnreadCounts());
       // Render the last encrypted Inbox cache immediately. Network discovery
       // and IMAP sync happen afterwards and must never block the first screen.
@@ -284,17 +285,27 @@ class _MailHomeState extends State<MailHome>
       if (!mounted) return;
       setState(() {
         _accounts = saved;
+        _liveSyncEnabled = livePreference;
         _messages = cachedInbox;
         _selectedMail = cachedInbox.isEmpty ? null : cachedInbox.first;
         _loading = false;
       });
       if (saved.isNotEmpty) {
+        if (Platform.isAndroid) {
+          unawaited(_scheduleAndroidBackgroundSync());
+          if (livePreference) {
+            unawaited(LiveMailService.start().then((started) {
+              if (mounted) setState(() => _liveSyncRunning = started);
+            }).catchError((Object _) {}));
+          }
+        }
         unawaited(_loadFolders());
         unawaited(_refresh());
         unawaited(_seedUnreadCounts());
       } else if (Platform.isAndroid) {
         try {
           await AndroidMailBackgroundSync.cancel();
+          await LiveMailService.stop();
         } catch (_) {}
       }
       if (WidgetsBinding.instance.lifecycleState == AppLifecycleState.paused) {
@@ -392,6 +403,40 @@ class _MailHomeState extends State<MailHome>
         setState(() => _syncing = false);
         if (shouldRefresh) unawaited(_refresh());
       }
+    }
+  }
+
+  Future<void> _toggleLiveSync() async {
+    if (!Platform.isAndroid || _accounts.isEmpty) return;
+    try {
+      if (_liveSyncEnabled) {
+        await LiveMailService.stop();
+        await _vault.writeLiveSyncEnabled(false);
+        if (mounted) setState(() {
+          _liveSyncEnabled = false;
+          _liveSyncRunning = false;
+        });
+        if (mounted) _notice('2-minute live sync stopped. Android periodic checks remain enabled.');
+        return;
+      }
+      final allowed = await _notifications.requestPermission();
+      if (!allowed) {
+        if (mounted) _notice('Allow notifications in Android Settings to receive new mail alerts.');
+        return;
+      }
+      final started = await LiveMailService.start();
+      if (!started) {
+        if (mounted) _notice('Could not start live sync. Android may be blocking background services.');
+        return;
+      }
+      await _vault.writeLiveSyncEnabled(true);
+      if (mounted) setState(() {
+        _liveSyncEnabled = true;
+        _liveSyncRunning = true;
+      });
+      if (mounted) _notice('Live checks enabled, about every 2 minutes while Android permits.');
+    } catch (error) {
+      if (mounted) _notice('Live sync unavailable: $error');
     }
   }
 
@@ -926,15 +971,12 @@ class _MailHomeState extends State<MailHome>
                 );
               },
             ),
-      floatingActionButton: account == null ? null : FloatingActionButton.extended(
+      floatingActionButton: account == null ? null : FloatingActionButton.small(
+        tooltip: 'Compose email',
         onPressed: _compose,
         backgroundColor: _orange,
-        foregroundColor: Colors.black,
-        icon: const Icon(Icons.edit_rounded),
-        label: const Text(
-          'Compose',
-          style: TextStyle(fontWeight: FontWeight.w800),
-        ),
+        foregroundColor: Colors.white,
+        child: const Icon(Icons.edit_rounded),
       ),
     );
   }
@@ -1213,7 +1255,7 @@ class _MailHomeState extends State<MailHome>
                 child: Text(
                   _syncing
                       ? 'Checking for new mail…'
-                      : 'Auto-checks every 5 minutes  ·  ${_messages.length} messages loaded',
+                      : 'Auto-checks every 2 minutes  ·  ${_messages.length} messages loaded',
                   style: const TextStyle(fontSize: 11, color: _muted),
                 ),
               ),

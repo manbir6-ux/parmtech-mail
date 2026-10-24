@@ -2251,10 +2251,10 @@ class MailDetailPage extends StatelessWidget {
           Text(
             message.subject,
             style: const TextStyle(
-              fontSize: 25,
+              fontSize: 27,
               height: 1.15,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -.4,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -.85,
             ),
           ),
           const SizedBox(height: 20),
@@ -2314,11 +2314,22 @@ class MailDetailPage extends StatelessWidget {
             ],
           ),
           const Divider(height: 32),
-          SelectableText(
-            message.body.isEmpty
-                ? 'This message has no readable text content.'
-                : message.body,
-            style: const TextStyle(height: 1.6, fontSize: 15),
+          Container(
+            padding: const EdgeInsets.all(19),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.surface,
+              borderRadius: BorderRadius.circular(19),
+              border: Border.all(
+                color: Theme.of(context).colorScheme.outlineVariant
+                    .withValues(alpha: .45),
+              ),
+            ),
+            child: SelectableText(
+              message.body.isEmpty
+                  ? 'This message has no readable text content.'
+                  : message.body,
+              style: const TextStyle(height: 1.65, fontSize: 14.5),
+            ),
           ),
           const SizedBox(height: 24),
           Wrap(spacing: 10, runSpacing: 10, children: [
@@ -2616,7 +2627,8 @@ class _ComposePageState extends State<ComposePage> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Text('New message'),
+      title: const Text('New message',
+          style: TextStyle(fontWeight: FontWeight.w900, fontSize: 21, letterSpacing: -.5)),
       actions: [
         IconButton(
           onPressed: _sending ? null : _send,
@@ -2629,11 +2641,28 @@ class _ComposePageState extends State<ComposePage> {
     body: ListView(
       padding: const EdgeInsets.all(18),
       children: [
-        Text(
-          'From  ${widget.account.email}',
-          style: const TextStyle(color: _muted),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 13),
+          decoration: BoxDecoration(
+            color: _orange.withValues(alpha: .095),
+            borderRadius: BorderRadius.circular(15),
+          ),
+          child: Row(
+            children: [
+              const Icon(Icons.alternate_email_rounded, color: _orange, size: 19),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'From  ${widget.account.email}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+                ),
+              ),
+            ],
+          ),
         ),
-        const SizedBox(height: 14),
+        const SizedBox(height: 18),
         TextField(
           controller: _to,
           keyboardType: TextInputType.emailAddress,
@@ -2680,6 +2709,16 @@ class _ComposePageState extends State<ComposePage> {
         const SizedBox(height: 8),
         const Text('Attachments: 20 MB total maximum',
             style: TextStyle(color: _muted, fontSize: 11)),
+        const SizedBox(height: 24),
+        FilledButton.icon(
+          onPressed: _sending ? null : _send,
+          icon: const Icon(Icons.send_rounded, size: 18),
+          label: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 15),
+            child: Text(_sending ? 'Sending…' : 'Send message',
+                style: const TextStyle(fontWeight: FontWeight.w800)),
+          ),
+        ),
       ],
     ),
   );

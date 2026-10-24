@@ -90,11 +90,13 @@ List<MailServerCandidate> cPanelHostCandidates(String email) {
   final domain = email.trim().split('@').last.toLowerCase();
   if (domain.isEmpty || !domain.contains('.')) return const [];
 
-  if (domain == 'parmtech.au') {
-    return const [
-      MailServerCandidate('premium214.web-hosting.com'),
-      MailServerCandidate('mail.parmtech.au'),
-      MailServerCandidate('parmtech.au'),
+  // Both domains are hosted on the same ParmTech cPanel server.
+  // Other customer domains can choose this profile in the account setup UI.
+  if (const {'parmtech.au', 'manbirtong.com'}.contains(domain)) {
+    return [
+      const MailServerCandidate('premium214.web-hosting.com'),
+      MailServerCandidate('mail.$domain'),
+      MailServerCandidate(domain),
     ];
   }
   if ((domain.startsWith('yahoo.') ||

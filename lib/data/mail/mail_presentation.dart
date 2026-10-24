@@ -36,9 +36,13 @@ DateTime? parseImapInternalDate(String? raw) {
   final offsetMinute = int.parse(match[9]!);
   if (month == 0 || day < 1 || day > 31 || hour > 23 ||
       minute > 59 || second > 59 || offsetHour > 23 ||
-      offsetMinute > 59) return null;
+      offsetMinute > 59) {
+    return null;
+  }
   final localFields = DateTime.utc(year, month, day, hour, minute, second);
-  if (localFields.month != month || localFields.day != day) return null;
+  if (localFields.month != month || localFields.day != day) {
+    return null;
+  }
   final offset = (offsetHour * 60 + offsetMinute) *
       (match[7] == '+' ? 1 : -1);
   return localFields.subtract(Duration(minutes: offset)).toLocal();

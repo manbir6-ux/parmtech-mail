@@ -15,6 +15,7 @@ import 'data/accounts/secure_account_vault.dart';
 import 'data/backup/encrypted_mail_backup.dart';
 import 'data/mail/cpanel_mail_service.dart';
 import 'data/mail/mail_conversations.dart';
+import 'widgets/inline_reply_box.dart';
 import 'data/notifications/mail_notifications.dart';
 
 Future<void> main() async {
@@ -620,12 +621,13 @@ class _MailHomeState extends State<MailHome>
     if (sent == true) await _refresh();
   }
 
-  Future<void> _open(MailItem message) async {
+  Future<void> _open(MailItem message, {List<MailItem> conversation = const []}) async {
     if (message.unread) unawaited(_actOnMail(message, 'read'));
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder: (_) => MailDetailPage(
           message: message,
+          conversation: conversation,
           account: _accounts.isEmpty ? null : _accounts[_active],
           service: _service,
           folders: _folders,
@@ -1478,6 +1480,7 @@ class _MailHomeState extends State<MailHome>
         ),
       );
     }
+    final conversations = groupMailConversations(visible);
     return Center(
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 900),
@@ -1485,15 +1488,20 @@ class _MailHomeState extends State<MailHome>
           onRefresh: _refresh,
           child: ListView.separated(
             padding: const EdgeInsets.fromLTRB(14, 2, 14, 100),
-            itemCount: visible.length,
+            itemCount: conversations.length,
             separatorBuilder: (_, _) => Divider(
               height: 1,
               indent: 70,
               color: _darkTheme ? Colors.white10 : Colors.black12,
             ),
             itemBuilder: (context, index) => _tile(
-              visible[index],
+              conversations[index].latest,
               compact: true,
+              threadCount: conversations[index].count,
+              onTap: () => _open(
+                conversations[index].latest,
+                conversation: conversations[index].messages,
+              ),
             ),
           ),
         ),
@@ -1505,6 +1513,7 @@ class _MailHomeState extends State<MailHome>
     MailItem mail, {
     bool selected = false,
     bool compact = false,
+    int threadCount = 1,
     VoidCallback? onTap,
   }) {
     final selectedForAction = _selectedMessageIds.contains(mail.identity);
@@ -2047,9 +2056,10 @@ class AddAccountPage extends StatefulWidget {
 }
 
 class MailDetailPage extends StatelessWidget {
-  const MailDetailPage({super.key, required this.message, this.account, this.service, this.folders = const [], this.onAction, this.onMove, this.onSent});
+  const MailDetailPage({super.key, required this.message, this.conversation = const [], this.account, this.service, this.folders = const [], this.onAction, this.onMove, this.onSent});
 
   final MailItem message;
+  final List<MailItem> conversation;
   final MailAccount? account;
   final CpanelMailService? service;
   final List<MailFolder> folders;
@@ -2143,7 +2153,7 @@ class MailDetailPage extends StatelessWidget {
           ),
           const SizedBox(height: 24),
           Wrap(spacing: 10, runSpacing: 10, children: [
-            FilledButton.icon(onPressed: account == null || service == null ? null : () => _compose(context, account!, service!, to: message.senderAddress, subject: message.subject.toLowerCase().startsWith('re:') ? message.subject : 'Re: ${message.subject}', body: '\n\nOn ${message.time}, ${message.sender} wrote:\n> ${message.body.replaceAll('\n', '\n> ')}'), icon: const Icon(Icons.reply_rounded), label: const Text('Reply')),
+            FilledButton.icon(onPressed: account == null || service == null ? null : () => _compose(context, account!, service!, to: message.senderAddress, subject: message.subject.toLowerCase().startsWith('re:') ? message.subject : 'Re: ${message.subject}', body: '\n\nOn ${message.time}, ${message.sender} wrote:\n> ${message.body.replaceAll('\n', '\n> ')}', inReplyTo: message.messageId, references: message.references), icon: const Icon(Icons.reply_rounded), label: const Text('Reply')),
             OutlinedButton.icon(onPressed: account == null || service == null ? null : () => _compose(context, account!, service!, subject: 'Fwd: ${message.subject}', body: '\n\n---------- Forwarded message ----------\nFrom: ${message.senderAddress}\nDate: ${message.time}\nSubject: ${message.subject}\n\n${message.body}'), icon: const Icon(Icons.forward_rounded), label: const Text('Forward')),
             OutlinedButton.icon(onPressed: () => _print(context), icon: const Icon(Icons.print_outlined), label: const Text('Print')),
           ]),
@@ -2152,8 +2162,8 @@ class MailDetailPage extends StatelessWidget {
     ),
   );
 
-  Future<void> _compose(BuildContext context, MailAccount account, CpanelMailService service, {String to = '', String subject = '', String body = ''}) async {
-    final sent = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => ComposePage(account: account, service: service, initialTo: to, initialSubject: subject, initialBody: body)));
+  Future<void> _compose(BuildContext context, MailAccount account, CpanelMailService service, {String to = '', String subject = '', String body = '', String? inReplyTo, String? references}) async {
+    final sent = await Navigator.of(context).push<bool>(MaterialPageRoute(builder: (_) => ComposePage(account: account, service: service, initialTo: to, initialSubject: subject, initialBody: body, inReplyTo: inReplyTo, references: references)));
     if (sent == true) await onSent?.call();
   }
 
@@ -2331,12 +2341,14 @@ class _AddAccountPageState extends State<AddAccountPage> {
 }
 
 class ComposePage extends StatefulWidget {
-  const ComposePage({super.key, required this.account, required this.service, this.initialTo = '', this.initialSubject = '', this.initialBody = ''});
+  const ComposePage({super.key, required this.account, required this.service, this.initialTo = '', this.initialSubject = '', this.initialBody = '', this.inReplyTo, this.references});
   final MailAccount account;
   final CpanelMailService service;
   final String initialTo;
   final String initialSubject;
   final String initialBody;
+  final String? inReplyTo;
+  final String? references;
   @override
   State<ComposePage> createState() => _ComposePageState();
 }
@@ -2488,6 +2500,8 @@ class _ComposePageState extends State<ComposePage> {
         subject: _subject.text.trim(),
         body: _body.text,
         attachments: List<OutgoingMailAttachment>.of(_attachments),
+        inReplyTo: widget.inReplyTo,
+        references: widget.references,
       );
       if (mounted) Navigator.pop(context, true);
     } catch (e) {

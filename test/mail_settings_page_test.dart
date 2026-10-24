@@ -1,15 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:parm_mail/data/appearance/mail_appearance.dart';
 import 'package:parm_mail/widgets/mail_settings_page.dart';
 
 void main() {
-  testWidgets('Settings holds account, backup and theme controls',
+  testWidgets('Settings includes accounts, backup, themes, fonts and layouts',
       (tester) async {
-    var changedTheme = false;
+    MailAppearance prefs = const MailAppearance();
     await tester.pumpWidget(MaterialApp(
       home: MailSettingsPage(
-        darkTheme: false,
-        onThemeToggle: () => changedTheme = !changedTheme,
+        appearance: prefs,
+        onAppearanceChanged: (value) => prefs = value,
         accountEmails: const ['hello@example.com'],
         onAddAccount: () async {},
         onRemoveAccount: (_) async {},
@@ -24,11 +25,14 @@ void main() {
     expect(find.text('Connect another account'), findsOneWidget);
     expect(find.text('Enable new-mail alerts'), findsNothing);
     expect(find.text('Fast background mail sync'), findsNothing);
-    expect(find.byType(Switch), findsOneWidget);
+    expect(find.byType(Switch), findsNothing);
 
-    await tester.tap(find.byType(Switch));
-    await tester.pump();
-    expect(changedTheme, isTrue);
+    final darkTheme = find.byKey(const Key('palette-midnight'));
+    await tester.ensureVisible(darkTheme);
+    await tester.pumpAndSettle();
+    await tester.tap(darkTheme);
+    await tester.pumpAndSettle();
+    expect(prefs.palette, MailPalette.midnight);
     expect(tester.takeException(), isNull);
   });
 }

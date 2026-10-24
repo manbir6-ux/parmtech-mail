@@ -2465,6 +2465,35 @@ class _AddAccountPageState extends State<AddAccountPage> {
                 ),
               ),
             ],
+            if (isValidMailAddress(_email.text) &&
+                !const {'gmail.com', 'googlemail.com', 'yahoo.com', 'ymail.com',
+                  'rocketmail.com', 'aol.com', 'icloud.com', 'me.com', 'mac.com',
+                  'outlook.com', 'hotmail.com', 'live.com', 'office365.com'}
+                    .contains(_email.text.trim().split('@').last.toLowerCase())) ...[
+              const SizedBox(height: 14),
+              OutlinedButton.icon(
+                onPressed: _testing ? null : () {
+                  setState(() {
+                    _imapHost.text = 'premium214.web-hosting.com';
+                    _smtpHost.text = 'premium214.web-hosting.com';
+                    _connectionError = null;
+                  });
+                },
+                icon: const Icon(Icons.cloud_done_outlined),
+                label: const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 9),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Use ParmTech shared hosting',
+                          style: TextStyle(fontWeight: FontWeight.w800)),
+                      Text('premium214.web-hosting.com · secure IMAP & SMTP',
+                          style: TextStyle(fontSize: 12, color: _muted)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
             if (reusableMailServers(widget.existingAccounts).isNotEmpty) ...[
               const SizedBox(height: 16),
               const Text(

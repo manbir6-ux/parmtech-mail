@@ -1886,33 +1886,62 @@ class _MailHomeState extends State<MailHome>
       child: ListView(
         padding: EdgeInsets.zero,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
+          Container(
+            margin: const EdgeInsets.fromLTRB(14, 14, 14, 17),
+            padding: const EdgeInsets.all(19),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  _orange.withValues(alpha: .17),
+                  _sky.withValues(alpha: .075),
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(21),
+              border: Border.all(color: _orange.withValues(alpha: .13)),
+            ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'PARMTECH',
-                  style: TextStyle(
-                    color: _orange,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 2,
-                  ),
+                const Row(
+                  children: [
+                    Icon(Icons.mark_email_unread_rounded, color: _orange, size: 20),
+                    SizedBox(width: 8),
+                    Text('PARMTECH MAIL',
+                        style: TextStyle(
+                          color: _orange,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1.45,
+                        )),
+                  ],
                 ),
-                const SizedBox(height: 4),
-                const Text(
-                  'Your mail',
-                  style: TextStyle(fontSize: 27, fontWeight: FontWeight.w900),
-                ),
-                Text(
-                  '${_accounts.length} of 10 accounts',
-                  style: const TextStyle(color: _muted),
-                ),
+                const SizedBox(height: 14),
+                const Text('Your workspace',
+                    style: TextStyle(
+                      fontSize: 23,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: -.8,
+                    )),
+                const SizedBox(height: 5),
+                Text('${_accounts.length} connected accounts',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    )),
               ],
             ),
           ),
-          const Divider(),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(24, 0, 12, 9),
+            child: Text('MAILBOXES',
+                style: TextStyle(
+                  color: _orange, fontSize: 10,
+                  fontWeight: FontWeight.w900, letterSpacing: 1.35,
+                )),
+          ),
           for (final folder in _folders)
             ListTile(
               leading: Icon(_folderIcon(folder)),
@@ -1942,7 +1971,15 @@ class _MailHomeState extends State<MailHome>
               title: const Text('Create folder'),
               onTap: () { Navigator.pop(context); _createFolder(); },
             ),
-          const Divider(),
+          const Divider(height: 25),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(24, 0, 12, 9),
+            child: Text('ACCOUNTS',
+                style: TextStyle(
+                  color: _orange, fontSize: 10,
+                  fontWeight: FontWeight.w900, letterSpacing: 1.35,
+                )),
+          ),
           for (final a in _accounts)
             ListTile(
               leading: CircleAvatar(
@@ -1958,15 +1995,9 @@ class _MailHomeState extends State<MailHome>
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
               ),
-              trailing: IconButton(
-                tooltip: 'Remove account',
-                icon: const Icon(Icons.logout_rounded, size: 18),
-                onPressed: () {
-                  final index = _accounts.indexOf(a);
-                  Navigator.pop(context);
-                  _removeAccount(index);
-                },
-              ),
+              trailing: _accounts.indexOf(a) == _active
+                  ? const Icon(Icons.check_circle_rounded, color: _orange, size: 19)
+                  : null,
               onTap: () {
                 setState(() {
                   _active = _accounts.indexOf(a);

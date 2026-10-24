@@ -15,6 +15,8 @@
 - [ ] Verify offline cache and message-action persistence across app restarts on physical devices.
 - [x] Add basic plain-text reply/forward, print, and up to 20 MB total outgoing attachments.
 - [x] Hide hostname controls and authenticate only against the single ParmTech server, with validated TLS.
+- [x] Provide six palettes (3 dark, 3 light), six local system font styles, and three inbox layouts with on-device persistence and UI tests.
+- [ ] Verify visuals across Android/iOS screen sizes and real device fonts; verify real IMAP authentication/SMTP send.
 - [x] Use bounded two-account concurrent foreground polling with one aggregated new-mail alert.
 - [ ] Add received-attachment downloads, richer safe HTML rendering, drafts, and background scheduling for iOS and desktop.
 - [ ] Verify notification behavior independently on current Android and iOS devices; no instant push guarantee is made.

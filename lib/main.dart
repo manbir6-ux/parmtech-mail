@@ -1542,9 +1542,9 @@ class _MailHomeState extends State<MailHome>
         child: RefreshIndicator(
           onRefresh: _refresh,
           child: ListView.separated(
-            padding: const EdgeInsets.fromLTRB(14, 2, 14, 100),
+            padding: EdgeInsets.fromLTRB(widget.appearance.layout == MailLayout.compact ? 9 : 14, 2, widget.appearance.layout == MailLayout.compact ? 9 : 14, 100),
             itemCount: conversations.length,
-            separatorBuilder: (_, _) => const SizedBox(height: 7),
+            separatorBuilder: (_, _) => SizedBox(height: widget.appearance.layout == MailLayout.compact ? 2 : widget.appearance.layout == MailLayout.cards ? 13 : 7),
             itemBuilder: (context, index) => _tile(
               conversations[index].latest,
               compact: true,
@@ -1568,6 +1568,8 @@ class _MailHomeState extends State<MailHome>
     VoidCallback? onTap,
   }) {
     final colors = Theme.of(context).colorScheme;
+    final compactStyle = widget.appearance.layout == MailLayout.compact;
+    final cardsStyle = widget.appearance.layout == MailLayout.cards;
     final selectedForAction = _selectedMessageIds.contains(mail.identity);
     final highlighted = selected || selectedForAction;
     const avatarPalette = <Color>[
@@ -1579,7 +1581,7 @@ class _MailHomeState extends State<MailHome>
     final senderHash = mail.sender.codeUnits.fold<int>(0, (a, b) => a + b);
     final avatarColor = avatarPalette[senderHash % avatarPalette.length];
     final shape = RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(17),
+      borderRadius: BorderRadius.circular(cardsStyle ? 23 : compactStyle ? 10 : 17),
       side: BorderSide(
         color: highlighted
             ? _orange.withValues(alpha: .38)
@@ -1611,21 +1613,21 @@ class _MailHomeState extends State<MailHome>
             _open(mail);
           }
         },
-        onLongPress: () => _showMailActions(mail),
+        onLongPress: () => setState(() { _selectedMessageIds.add(mail.identity); }),
         child: Semantics(
           button: true,
           label: 'Email from ${mail.sender}. ${mail.subject}. ${mail.time}',
           child: Padding(
             padding: EdgeInsets.symmetric(
-              horizontal: compact ? 13 : 15,
-              vertical: compact ? 13 : 15,
+              horizontal: compactStyle ? 10 : cardsStyle ? 19 : compact ? 13 : 15,
+              vertical: compactStyle ? 8 : cardsStyle ? 20 : compact ? 13 : 15,
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Container(
-                  width: compact ? 43 : 46,
-                  height: compact ? 43 : 46,
+                  width: compactStyle ? 34 : cardsStyle ? 52 : compact ? 43 : 46,
+                  height: compactStyle ? 34 : cardsStyle ? 52 : compact ? 43 : 46,
                   alignment: Alignment.center,
                   decoration: BoxDecoration(
                     color: avatarColor.withValues(alpha: _darkTheme ? .23 : .13),
@@ -1645,7 +1647,7 @@ class _MailHomeState extends State<MailHome>
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
+                SizedBox(width: compactStyle ? 8 : 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1661,7 +1663,7 @@ class _MailHomeState extends State<MailHome>
                                 fontWeight: mail.unread
                                     ? FontWeight.w900
                                     : FontWeight.w700,
-                                fontSize: compact ? 14 : 15,
+                                fontSize: compactStyle ? 13 : cardsStyle ? 16 : compact ? 14 : 15,
                                 height: 1.15,
                                 letterSpacing: -.25,
                               ),
@@ -1687,7 +1689,7 @@ class _MailHomeState extends State<MailHome>
                           ],
                         ],
                       ),
-                      const SizedBox(height: 6),
+                      SizedBox(height: compactStyle ? 2 : 6),
                       Text(
                         mail.subject.isEmpty ? '(No subject)' : mail.subject,
                         maxLines: 1,
@@ -1696,12 +1698,12 @@ class _MailHomeState extends State<MailHome>
                           fontWeight: mail.unread
                               ? FontWeight.w800
                               : FontWeight.w600,
-                          fontSize: compact ? 13.5 : 14,
+                          fontSize: compactStyle ? 12.5 : cardsStyle ? 15 : compact ? 13.5 : 14,
                           height: 1.2,
                           letterSpacing: -.15,
                         ),
                       ),
-                      const SizedBox(height: 6),
+                      SizedBox(height: compactStyle ? 2 : cardsStyle ? 10 : 6),
                       Row(
                         children: [
                           if (threadCount > 1) ...[
@@ -1728,10 +1730,10 @@ class _MailHomeState extends State<MailHome>
                           Expanded(
                             child: Text(
                               mail.body.replaceAll(RegExp(r'\s+'), ' ').trim(),
-                              maxLines: 1,
+                              maxLines: cardsStyle ? 2 : 1,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
-                                fontSize: 12,
+                                fontSize: compactStyle ? 10 : cardsStyle ? 13 : 12,
                                 color: colors.onSurfaceVariant,
                                 height: 1.2,
                               ),

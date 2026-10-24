@@ -54,7 +54,7 @@ ThemeData _mailTheme(Brightness brightness) {
     brightness: brightness,
     scaffoldBackgroundColor: palette.background,
     colorScheme: scheme,
-    fontFamily: _activeAppearance.font.family,
+    fontFamily: _activeAppearance.font.familyForPlatform(defaultTargetPlatform),
     appBarTheme: AppBarTheme(backgroundColor: palette.background, elevation: 0),
     textTheme: const TextTheme(
       headlineLarge: TextStyle(fontWeight: FontWeight.w900, letterSpacing: -1.2),
@@ -1282,92 +1282,159 @@ class _MailHomeState extends State<MailHome>
     );
   }
 
+  Future<void> _desktopWrite(MailItem mail, {bool forward = false}) async {
+    if (_accounts.isEmpty) return;
+    final originalSubject = mail.subject.isEmpty ? '(No subject)' : mail.subject;
+    final subject = forward
+        ? 'Fwd: $originalSubject'
+        : originalSubject.toLowerCase().startsWith('re:')
+            ? originalSubject
+            : 'Re: $originalSubject';
+    final body = forward
+        ? '\n\n---------- Forwarded message ----------\n'
+            'From: ${mail.senderAddress}\nDate: ${mail.time}\n'
+            'Subject: $originalSubject\n\n${mail.body}'
+        : '\n\nOn ${mail.time}, ${mail.sender} wrote:\n'
+            '> ${mail.body.replaceAll('\n', '\n> ')}';
+    final recipient = forward ? '' : mail.replyToAddress.isNotEmpty
+        ? mail.replyToAddress : mail.senderAddress;
+    final sent = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(builder: (_) => ComposePage(
+        account: _accounts[_active],
+        service: _service,
+        initialTo: recipient,
+        initialSubject: subject,
+        initialBody: body,
+        inReplyTo: forward ? null : mail.messageId,
+        references: forward ? null : mail.references,
+      )),
+    );
+    if (sent == true && mounted) await _refresh();
+  }
+
   Widget _desktopMessagePreview(MailItem? mail) {
+    final colors = Theme.of(context).colorScheme;
     if (mail == null) {
-      return const Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+      return Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Icon(Icons.mark_email_read_outlined, size: 49,
+            color: colors.primary.withValues(alpha: .7)),
+        const SizedBox(height: 13),
+        const Text('Select a conversation',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 5),
+        Text('Messages appear here, without opening a new window.',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: 12,
+              color: colors.onSurfaceVariant)),
+      ]));
+    }
+    final initial = mail.sender.trim().isEmpty
+        ? '?' : mail.sender.trim()[0].toUpperCase();
+    return Column(children: [
+      Container(
+        padding: const EdgeInsets.fromLTRB(17, 6, 14, 6),
+        decoration: BoxDecoration(border: Border(
+            bottom: BorderSide(color: colors.outlineVariant))),
+        child: Row(children: [
+          const Expanded(child: Text('MESSAGE',
+            style: TextStyle(fontSize: 10,
+                fontWeight: FontWeight.w900, letterSpacing: 1.2))),
+          IconButton(
+            onPressed: () => unawaited(_actOnMail(mail, 'archive')),
+            tooltip: 'Archive', icon: const Icon(Icons.archive_outlined,
+                size: 19)),
+          IconButton(
+            onPressed: () => unawaited(_actOnMail(mail, 'star')),
+            tooltip: 'Star or unstar',
+            icon: Icon(mail.starred ? Icons.star_rounded :
+                Icons.star_border_rounded, size: 19)),
+          IconButton(
+            onPressed: () => unawaited(_actOnMail(mail, 'delete')),
+            tooltip: 'Move to trash',
+            icon: const Icon(Icons.delete_outline_rounded, size: 19)),
+          IconButton(
+            onPressed: () => unawaited(_open(mail)),
+            tooltip: 'Open full message',
+            icon: const Icon(Icons.open_in_new_rounded, size: 18)),
+        ]),
+      ),
+      Expanded(
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(24, 21, 24, 20),
           children: [
-            Icon(Icons.mark_email_read_outlined, size: 52, color: _muted),
-            SizedBox(height: 14),
-            Text(
-              'Select a message to read',
-              style: TextStyle(color: _muted, fontSize: 15),
+            Text(mail.subject.isEmpty ? '(No subject)' : mail.subject,
+              style: const TextStyle(
+                fontWeight: FontWeight.w900, fontSize: 24,
+                letterSpacing: -.7, height: 1.22)),
+            const SizedBox(height: 20),
+            Row(children: [
+              CircleAvatar(
+                radius: 19,
+                backgroundColor: colors.primary.withValues(alpha: .13),
+                child: Text(initial, style: TextStyle(
+                  color: colors.primary, fontWeight: FontWeight.w800)),
+              ),
+              const SizedBox(width: 11),
+              Expanded(child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(mail.sender,
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w800)),
+                  Text(mail.senderAddress,
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 11,
+                      color: colors.onSurfaceVariant)),
+                ],
+              )),
+              const SizedBox(width: 8),
+              Text(mail.time,
+                style: TextStyle(fontSize: 10.5,
+                    color: colors.onSurfaceVariant)),
+            ]),
+            const SizedBox(height: 20),
+            Material(
+              color: colors.surface,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(15),
+                side: BorderSide(
+                  color: colors.outlineVariant.withValues(alpha: .55))),
+              child: Padding(
+                padding: const EdgeInsets.all(19),
+                child: SelectableText(
+                  mail.body.isEmpty
+                      ? 'This message has no readable plain-text content.'
+                      : mail.body,
+                  style: const TextStyle(
+                    fontSize: 13.5, height: 1.65),
+                ),
+              ),
             ),
           ],
         ),
-      );
-    }
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(30, 28, 34, 24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  mail.subject,
-                  style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w800,
-                    height: 1.2,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 22),
-          Row(
-            children: [
-              CircleAvatar(
-                backgroundColor: _orange.withValues(alpha: .2),
-                foregroundColor: _orange,
-                child: Text(
-                  mail.sender.trim().isEmpty
-                      ? '?'
-                      : mail.sender.trim()[0].toUpperCase(),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      mail.sender,
-                      style: const TextStyle(fontWeight: FontWeight.w700),
-                    ),
-                    if (mail.senderAddress.isNotEmpty &&
-                        mail.senderAddress.toLowerCase() !=
-                            mail.sender.toLowerCase())
-                      Text(
-                        mail.senderAddress,
-                        style: const TextStyle(fontSize: 11, color: _muted),
-                      ),
-                    Text(
-                      mail.time.isEmpty ? 'From your mailbox' : mail.time,
-                      style: const TextStyle(fontSize: 11, color: _muted),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const Divider(height: 32),
-          Expanded(
-            child: SingleChildScrollView(
-              child: SelectableText(
-                mail.body.isEmpty
-                    ? 'This message has no plain-text preview.'
-                    : mail.body,
-                style: const TextStyle(height: 1.65, fontSize: 14),
-              ),
-            ),
-          ),
-        ],
       ),
-    );
+      Container(
+        padding: const EdgeInsets.fromLTRB(17, 10, 17, 15),
+        decoration: BoxDecoration(border: Border(
+            top: BorderSide(color: colors.outlineVariant))),
+        child: Row(children: [
+          FilledButton.icon(
+            onPressed: () => unawaited(_desktopWrite(mail)),
+            icon: const Icon(Icons.reply_rounded, size: 16),
+            label: const Text('Reply')),
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: () => unawaited(_desktopWrite(mail, forward: true)),
+            icon: const Icon(Icons.forward_rounded, size: 16),
+            label: const Text('Forward')),
+          const Spacer(),
+          IconButton(
+            tooltip: 'More options, print and attachments',
+            onPressed: () => unawaited(_open(mail)),
+            icon: const Icon(Icons.more_horiz_rounded)),
+        ]),
+      ),
+    ]);
   }
 
   Widget _header(MailAccount? account) {

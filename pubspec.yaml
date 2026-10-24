@@ -19,6 +19,9 @@ dependencies:
   cryptography: ^2.9.0
   printing: ^5.14.2
   pdf: ^3.11.3
+  # PDF 3.12 resolves archive 4.0.x; image >=4.11 needs archive 4.4+.
+  # Keep the image transitive dependency on its compatible API generation.
+  image: 4.5.4
 
 dev_dependencies:
   flutter_test:

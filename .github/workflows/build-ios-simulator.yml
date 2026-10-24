@@ -1,0 +1,52 @@
+name: Build iOS Simulator ZIP for Appetize
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/build-ios-simulator.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  ios-simulator:
+    runs-on: macos-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate iOS project and configure minimum iOS version
+        run: |
+          flutter create . --platforms=ios
+          python3 tool/prepare_ios.py
+          flutter pub get
+
+      - name: Build for iOS Simulator (not physical iPhone)
+        run: flutter build ios --simulator --debug --no-codesign
+
+      - name: Verify and package Appetize-compatible .app ZIP
+        run: |
+          set -euo pipefail
+          APP="build/ios/iphonesimulator/Runner.app"
+          test -f "$APP/Info.plist"
+          /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP/Info.plist"
+          test -d "$APP/Frameworks"
+          mkdir -p artifacts
+          ditto -c -k --keepParent "$APP" "artifacts/ParmTech-Mail-v0.3.1-Appetize-iOS-Simulator.zip"
+          unzip -t "artifacts/ParmTech-Mail-v0.3.1-Appetize-iOS-Simulator.zip" | tail -n 1
+          unzip -Z -1 "artifacts/ParmTech-Mail-v0.3.1-Appetize-iOS-Simulator.zip" | grep -q '^Runner.app/Info.plist$'
+          ls -lh artifacts/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parmtech-mail-appetize-ios-simulator
+          path: artifacts/ParmTech-Mail-v0.3.1-Appetize-iOS-Simulator.zip
+          retention-days: 30
+          if-no-files-found: error

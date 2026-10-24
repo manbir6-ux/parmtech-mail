@@ -37,7 +37,6 @@ Future<void> main() async {
 
 MailAppearance _activeAppearance = const MailAppearance();
 bool get _darkTheme => _activeAppearance.palette.isDark;
-Color get _ink => _activeAppearance.palette.background;
 Color get _panel => _activeAppearance.palette.surface;
 const _orange = Color(0xFF5066E9);
 const _sky = Color(0xFF08A7C7);

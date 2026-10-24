@@ -50,7 +50,7 @@ void main() {
 
   test('private mail hint does not suggest other providers', () {
     expect(mailSetupHint('sales@example.com'), contains('Private ParmTech'));
-    expect(mailSetupHint('sales@example.com'), contains('only'));
+    expect(mailSetupHint('sales@example.com'), contains('Only mailboxes'));
   });
 
   test('TLS failures still surface to the user', () {

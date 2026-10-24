@@ -86,7 +86,9 @@ List<MailServerCandidate> cPanelHostCandidates(String email) {
 String recommendedSmtpHost(String email) {
   final domain = email.trim().split('@').last.toLowerCase();
   if ((domain.startsWith('yahoo.') ||
-      const {'ymail.com', 'rocketmail.com'}.contains(domain))) return 'smtp.mail.yahoo.com';
+      const {'ymail.com', 'rocketmail.com'}.contains(domain))) {
+    return 'smtp.mail.yahoo.com';
+  }
   if (const {'gmail.com', 'googlemail.com'}.contains(domain)) {
     return 'smtp.gmail.com';
   }

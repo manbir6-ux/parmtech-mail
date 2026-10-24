@@ -822,8 +822,6 @@ class _MailHomeState extends State<MailHome>
       final path = await FilePicker.saveFile(
         fileName: 'Parmtech-Mail-Backup.ptmail',
         bytes: bytes,
-        type: FileType.custom,
-        allowedExtensions: const ['ptmail'],
       );
       if (path != null && mounted) _notice('Encrypted backup saved. Keep the passphrase safe.');
     } catch (e) { if (mounted) _notice('Backup could not be created: ${friendlyMailError(e)}'); }

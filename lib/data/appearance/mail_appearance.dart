@@ -34,6 +34,45 @@ enum MailFont {
   const MailFont(this.label, this.family);
   final String label;
   final String family;
+
+  /// Use fonts actually present on each OS rather than Android-only
+  /// 'sans-serif-*' aliases, which collapse to the same face on desktops.
+  /// Fallbacks are provided by Flutter when the OS font is not installed.
+  String familyForPlatform(TargetPlatform platform) {
+    switch (platform) {
+      case TargetPlatform.windows:
+        return switch (this) {
+          MailFont.modern => 'Segoe UI',
+          MailFont.bold => 'Arial',
+          MailFont.condensed => 'Arial Narrow',
+          MailFont.airy => 'Segoe UI Light',
+          MailFont.editorial => 'Georgia',
+          MailFont.mono => 'Consolas',
+        };
+      case TargetPlatform.macOS:
+      case TargetPlatform.iOS:
+        return switch (this) {
+          MailFont.modern => '.AppleSystemUIFont',
+          MailFont.bold => 'Helvetica Neue',
+          MailFont.condensed => 'Helvetica Neue Condensed',
+          MailFont.airy => 'Avenir Next',
+          MailFont.editorial => 'Georgia',
+          MailFont.mono => 'Menlo',
+        };
+      case TargetPlatform.linux:
+        return switch (this) {
+          MailFont.modern => 'Noto Sans',
+          MailFont.bold => 'DejaVu Sans',
+          MailFont.condensed => 'Liberation Sans Narrow',
+          MailFont.airy => 'Ubuntu',
+          MailFont.editorial => 'DejaVu Serif',
+          MailFont.mono => 'DejaVu Sans Mono',
+        };
+      case TargetPlatform.android:
+      case TargetPlatform.fuchsia:
+        return family;
+    }
+  }
 }
 
 enum MailLayout {

@@ -324,8 +324,15 @@ class _MailHomeState extends State<MailHome>
     }
     try {
       final items = await _service.fetchFolder(account, folderPath);
+      // Account removal may happen while IMAP is fetching. Do not recreate a
+      // removed account's private cached messages after logout.
+      if (!mounted || !_accounts.any((saved) => saved.id == account.id)) return;
       await _vault.writeMailCache(account.id, folderPath,
           jsonEncode(items.map((message) => message.toJson()).toList()));
+      if (!_accounts.any((saved) => saved.id == account.id)) {
+        await _vault.remove(account.email);
+        return;
+      }
       final isInbox = folderPath.toUpperCase() == 'INBOX';
       final currentUnread = isInbox
           ? await _service.countUnread(account)
@@ -341,7 +348,7 @@ class _MailHomeState extends State<MailHome>
           /* Notification permission is optional. */
         }
       }
-      if (isInbox) {
+      if (isInbox && _accounts.any((saved) => saved.id == account.id)) {
         _lastUnreadByEmail[account.id] = currentUnread;
       }
       if (mounted &&
@@ -430,8 +437,11 @@ class _MailHomeState extends State<MailHome>
           // The next successful sync will establish this account's baseline.
         }
       }
+      final currentIds = _accounts.map((account) => account.id).toSet();
+      counts.removeWhere((id, _) => !currentIds.contains(id));
+      _lastUnreadByEmail.removeWhere((id, _) => !currentIds.contains(id));
       _lastUnreadByEmail.addAll(counts);
-      await _vault.writeUnreadCounts(counts);
+      await _vault.writeUnreadCounts(_lastUnreadByEmail);
     } catch (_) {}
   }
 

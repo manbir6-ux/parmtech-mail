@@ -134,19 +134,6 @@ class _MailSettingsPageState extends State<MailSettingsPage> {
             ),
           ]),
           const SizedBox(height: 25),
-          const _SectionTitle('Mail delivery'),
-          const _SettingsPanel(children: [
-            ListTile(
-              leading: Icon(Icons.notifications_active_outlined),
-              title: Text('Automatic mail checking'),
-              subtitle: Text(
-                'Enabled by default. Android notification permission is '
-                'required for alerts. Delivery times depend on device '
-                'battery policies and network access.',
-              ),
-            ),
-          ]),
-          const SizedBox(height: 24),
           const Center(
             child: Text('Built by ParmTech · v0.3.1',
                 style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),

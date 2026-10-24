@@ -14,6 +14,40 @@ String displaySenderName({
   return address == null || address.isEmpty ? fallback : address;
 }
 
+/// Convert RFC 3501 INTERNALDATE to local time when the sender Date
+/// header is missing or invalid. IMAP encodes it as DD-MMM-YYYY HH:MM:SS +/-HHMM.
+DateTime? parseImapInternalDate(String? raw) {
+  if (raw == null || raw.trim().isEmpty) return null;
+  final iso = DateTime.tryParse(raw);
+  if (iso != null) return iso.toLocal();
+  final match = RegExp(
+    r'^\s*"?(\d{1,2})-([a-zA-Z]{3})-(\d{4})\s+(\d{2}):(\d{2}):(\d{2})\s+([+-])(\d{2})(\d{2})"?\s*$',
+  ).firstMatch(raw);
+  if (match == null) return null;
+  const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun',
+                  'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  final month = months.indexOf(match[2]!.toLowerCase()) + 1;
+  final day = int.parse(match[1]!);
+  final year = int.parse(match[3]!);
+  final hour = int.parse(match[4]!);
+  final minute = int.parse(match[5]!);
+  final second = int.parse(match[6]!);
+  final offsetHour = int.parse(match[8]!);
+  final offsetMinute = int.parse(match[9]!);
+  if (month == 0 || day < 1 || day > 31 || hour > 23 ||
+      minute > 59 || second > 59 || offsetHour > 23 ||
+      offsetMinute > 59) {
+    return null;
+  }
+  final localFields = DateTime.utc(year, month, day, hour, minute, second);
+  if (localFields.month != month || localFields.day != day) {
+    return null;
+  }
+  final offset = (offsetHour * 60 + offsetMinute) *
+      (match[7] == '+' ? 1 : -1);
+  return localFields.subtract(Duration(minutes: offset)).toLocal();
+}
+
 String formatMailTimestamp(DateTime? timestamp, {DateTime? now}) {
   if (timestamp == null) return '';
   final sentAt = timestamp.toLocal();

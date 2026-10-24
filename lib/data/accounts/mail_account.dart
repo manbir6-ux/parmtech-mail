@@ -52,7 +52,9 @@ List<MailServerCandidate> cPanelHostCandidates(String email) {
       MailServerCandidate('parmtech.au'),
     ];
   }
-  return [MailServerCandidate(domain)];
+  // Ordinary cPanel setups may use either the root domain or mail.domain.
+  // We never skip TLS certificate validation for either candidate.
+  return [MailServerCandidate(domain), MailServerCandidate('mail.$domain')];
 }
 
 bool isValidMailAddress(String value) {
@@ -84,4 +86,20 @@ bool isValidMailAddress(String value) {
         !label.endsWith('-') &&
         RegExp(r'^[a-zA-Z0-9-]+$').hasMatch(label),
   );
+}
+
+/// Manual server settings accept a DNS hostname only (not a URL or IP).
+/// Implicit TLS is still required on IMAP 993 and SMTP 465.
+bool isValidMailServerHost(String value) {
+  final host = value.trim();
+  if (host.isEmpty || host.length > 253 || host.contains('://') ||
+      host.contains('/') || host.contains(':') || host.contains(' ')) {
+    return false;
+  }
+  final labels = host.split('.');
+  if (labels.length < 2) return false;
+  return labels.every((label) =>
+      label.isNotEmpty && label.length <= 63 &&
+      !label.startsWith('-') && !label.endsWith('-') &&
+      RegExp(r'^[a-zA-Z0-9-]+$').hasMatch(label));
 }

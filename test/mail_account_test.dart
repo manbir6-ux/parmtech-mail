@@ -10,7 +10,16 @@ void main() {
     ]);
 
     final other = cPanelHostCandidates('admin@example.org');
-    expect(other.map((candidate) => candidate.host), ['example.org']);
+    expect(other.map((candidate) => candidate.host), ['example.org', 'mail.example.org']);
+  });
+
+  test('custom IMAP and SMTP settings require a TLS-capable hostname', () {
+    expect(isValidMailServerHost('premium214.web-hosting.com'), isTrue);
+    expect(isValidMailServerHost('mail.example.org'), isTrue);
+    expect(isValidMailServerHost('https://example.org'), isFalse);
+    expect(isValidMailServerHost('example.org:993'), isFalse);
+    expect(isValidMailServerHost('invalid host.example.org'), isFalse);
+    expect(isValidMailServerHost(''), isFalse);
   });
 
   test('mailbox email is normalized for account identity', () {

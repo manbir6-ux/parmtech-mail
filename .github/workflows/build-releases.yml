@@ -29,7 +29,7 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: python3 tool/configure_android_signing.py
       - run: flutter pub get
-      - run: flutter build apk --release
+      - run: flutter build apk --release --build-number="${{ github.run_number }}"
       - uses: actions/upload-artifact@v4
         with:
           name: parmtech-mail-android

@@ -38,6 +38,17 @@ void main() {
       expect(formatMailTimestamp(null, now: now), isEmpty);
     });
 
+    test('parses RFC 3501 server time if the Date header is missing', () {
+      expect(
+        parseImapInternalDate('"24-Oct-2026 13:30:10 +1100"')
+            ?.toUtc()
+            .toIso8601String(),
+        '2026-10-24T02:30:10.000Z',
+      );
+      expect(parseImapInternalDate('32-Oct-2026 10:00:00 +1100'), isNull);
+      expect(parseImapInternalDate('broken'), isNull);
+    });
+
     test('renders HTML-only email content as safe readable text', () {
       expect(
         htmlMailToText(

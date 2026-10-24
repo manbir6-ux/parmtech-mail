@@ -266,14 +266,31 @@ class _MailHomeState extends State<MailHome>
     try {
       final saved = await _vault.readAll();
       _lastUnreadByEmail.addAll(await _vault.readUnreadCounts());
+      // Render the last encrypted Inbox cache immediately. Network discovery
+      // and IMAP sync happen afterwards and must never block the first screen.
+      var cachedInbox = <MailItem>[];
+      if (saved.isNotEmpty) {
+        try {
+          final raw = await _vault.readMailCache(saved.first.id, 'INBOX');
+          if (raw != null) {
+            cachedInbox = (jsonDecode(raw) as List<dynamic>)
+                .map((entry) => MailItem.fromJson(entry as Map<String, dynamic>))
+                .toList(growable: true);
+          }
+        } catch (_) {
+          // Ignore corrupt local cache, then fetch fresh messages.
+        }
+      }
       if (!mounted) return;
       setState(() {
         _accounts = saved;
+        _messages = cachedInbox;
+        _selectedMail = cachedInbox.isEmpty ? null : cachedInbox.first;
         _loading = false;
       });
       if (saved.isNotEmpty) {
-        await _loadFolders();
-        await _refresh();
+        unawaited(_loadFolders());
+        unawaited(_refresh());
         unawaited(_seedUnreadCounts());
       } else if (Platform.isAndroid) {
         try {
@@ -311,7 +328,8 @@ class _MailHomeState extends State<MailHome>
     if (_messages.isEmpty) {
       try {
         final cached = await _vault.readMailCache(account.id, folderPath);
-        if (cached != null && mounted && _accounts[_active].id == account.id) {
+        if (cached != null && mounted && _accounts.isNotEmpty &&
+            _accounts[_active].id == account.id && _folderPath == folderPath) {
           final records = jsonDecode(cached) as List<dynamic>;
           setState(() => _messages = records
               .map((entry) => MailItem.fromJson(entry as Map<String, dynamic>))
@@ -323,8 +341,15 @@ class _MailHomeState extends State<MailHome>
     }
     try {
       final items = await _service.fetchFolder(account, folderPath);
+      // Account removal may happen while IMAP is fetching. Do not recreate a
+      // removed account's private cached messages after logout.
+      if (!mounted || !_accounts.any((saved) => saved.id == account.id)) return;
       await _vault.writeMailCache(account.id, folderPath,
           jsonEncode(items.map((message) => message.toJson()).toList()));
+      if (!_accounts.any((saved) => saved.id == account.id)) {
+        await _vault.remove(account.email);
+        return;
+      }
       final isInbox = folderPath.toUpperCase() == 'INBOX';
       final currentUnread = isInbox
           ? await _service.countUnread(account)
@@ -340,7 +365,7 @@ class _MailHomeState extends State<MailHome>
           /* Notification permission is optional. */
         }
       }
-      if (isInbox) {
+      if (isInbox && _accounts.any((saved) => saved.id == account.id)) {
         _lastUnreadByEmail[account.id] = currentUnread;
       }
       if (mounted &&
@@ -349,9 +374,8 @@ class _MailHomeState extends State<MailHome>
           _folderPath == folderPath) {
         setState(() {
           _messages = items;
-          if (_selectedMail == null || !items.contains(_selectedMail)) {
-            _selectedMail = items.isEmpty ? null : items.first;
-          }
+          _selectedMail = items.where((m) => m.identity == _selectedMail?.identity).firstOrNull ??
+                    (items.isEmpty ? null : items.first);
         });
       }
       await _vault.writeUnreadCounts(_lastUnreadByEmail);
@@ -375,38 +399,61 @@ class _MailHomeState extends State<MailHome>
     if (!mounted || _accounts.isEmpty || _syncing) return;
     final accounts = List<MailAccount>.of(_accounts);
     final activeAccountId = _accounts[_active].id;
+    var newMailCount = 0;
     setState(() => _syncing = true);
     try {
-      for (final account in accounts) {
-        try {
-          final isActiveInbox = account.id == activeAccountId &&
-              _folderPath.toUpperCase() == 'INBOX';
-          final items = isActiveInbox ? await _service.fetchInbox(account) : null;
-          final unread = await _service.countUnread(account);
-          if (!_accounts.any((saved) => saved.id == account.id)) continue;
-          final previous = _lastUnreadByEmail[account.id];
-          _lastUnreadByEmail[account.id] = unread;
-          if (previous != null && unread > previous) {
-            try {
-              await _notifications.showNewMail(unread - previous);
-            } catch (_) {}
-          }
-          if (items != null &&
-              mounted &&
-              _accounts.isNotEmpty &&
-              _accounts[_active].id == account.id &&
-              _folderPath.toUpperCase() == 'INBOX') {
-            setState(() {
-              _messages = items;
-              if (_selectedMail == null || !items.contains(_selectedMail)) {
-                _selectedMail = items.isEmpty ? null : items.first;
+      // Bound concurrency to two accounts: much faster across several
+      // mailboxes without overwhelming a cPanel shared-hosting server.
+      for (var start = 0; start < accounts.length; start += 2) {
+        await Future.wait(accounts.skip(start).take(2).map((account) async {
+          try {
+            final unread = await _service.countUnread(account);
+            if (!mounted || !_accounts.any((saved) => saved.id == account.id)) {
+              return;
+            }
+            final previous = _lastUnreadByEmail[account.id];
+            _lastUnreadByEmail[account.id] = unread;
+            if (previous != null && unread > previous) {
+              newMailCount += unread - previous;
+            }
+            final isActiveInbox = account.id == activeAccountId &&
+                _accounts.isNotEmpty &&
+                _accounts[_active].id == account.id &&
+                _folderPath.toUpperCase() == 'INBOX';
+            if (isActiveInbox) {
+              final items = await _service.fetchInbox(account);
+              if (!mounted ||
+                  !_accounts.any((saved) => saved.id == account.id)) {
+                return;
               }
-            });
+              await _vault.writeMailCache(account.id, 'INBOX',
+                  jsonEncode(items.map((item) => item.toJson()).toList()));
+              if (!mounted ||
+                  _accounts.isEmpty ||
+                  _accounts[_active].id != account.id ||
+                  _folderPath.toUpperCase() != 'INBOX') {
+                return;
+              }
+              setState(() {
+                _messages = items;
+                _selectedMail = items
+                        .where((item) => item.identity == _selectedMail?.identity)
+                        .firstOrNull ??
+                    (items.isEmpty ? null : items.first);
+              });
+            }
+          } catch (_) {
+            // Retain the previous unread snapshot until a successful poll.
           }
-        } catch (_) {
-          // A temporary connection failure is retried at the next poll.
-        }
+        }));
       }
+      if (newMailCount > 0) {
+        try {
+          await _notifications.showNewMail(newMailCount);
+        } catch (_) {}
+      }
+      final activeIds = _accounts.map((account) => account.id).toSet();
+      _lastUnreadByEmail.removeWhere((id, _) => !activeIds.contains(id));
       await _vault.writeUnreadCounts(_lastUnreadByEmail);
     } finally {
       if (mounted) {
@@ -431,8 +478,11 @@ class _MailHomeState extends State<MailHome>
           // The next successful sync will establish this account's baseline.
         }
       }
+      final currentIds = _accounts.map((account) => account.id).toSet();
+      counts.removeWhere((id, _) => !currentIds.contains(id));
+      _lastUnreadByEmail.removeWhere((id, _) => !currentIds.contains(id));
       _lastUnreadByEmail.addAll(counts);
-      await _vault.writeUnreadCounts(counts);
+      await _vault.writeUnreadCounts(_lastUnreadByEmail);
     } catch (_) {}
   }
 
@@ -612,7 +662,7 @@ class _MailHomeState extends State<MailHome>
         if (_folders.any((folder) => folder.path != message.mailboxPath && !_isSystemFolder(folder)))
           ListTile(leading: const Icon(Icons.drive_file_move_outline), title: const Text('Move to folder'), onTap: () => Navigator.pop(ctx, 'move')),
         ListTile(leading: const Icon(Icons.report_gmailerrorred_outlined), title: const Text('Mark as spam'), onTap: () => Navigator.pop(ctx, 'spam')),
-        ListTile(leading: const Icon(Icons.person_remove_outlined), title: Text('Delete all from ${message.sender}'), onTap: () => Navigator.pop(ctx, 'sender')),
+        ListTile(leading: const Icon(Icons.person_remove_outlined), title: Text('Delete loaded messages from ${message.sender}'), onTap: () => Navigator.pop(ctx, 'sender')),
       ])),
     );
     if (action == 'select') {
@@ -621,11 +671,25 @@ class _MailHomeState extends State<MailHome>
       final sameSender = message.senderAddress.trim().isEmpty
           ? <MailItem>[message]
           : _messages.where((m) => m.senderAddress.toLowerCase() == message.senderAddress.toLowerCase()).toList();
+      if (!mounted) return;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Delete sender messages?'),
+          content: Text('This deletes ${sameSender.length} currently loaded message(s) from ${message.sender}. Other server messages are not included.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+          ],
+        ),
+      );
+      if (confirmed != true || !mounted || _accounts.isEmpty) return;
       try {
         await _service.deleteMessages(_accounts[_active], sameSender);
         if (mounted) setState(() { _messages.removeWhere((m) => sameSender.any((item) => item.identity == m.identity)); _selectedMessageIds.removeAll(sameSender.map((m) => m.identity)); });
       } catch (e) { if (mounted) _notice(friendlyMailError(e)); }
     } else if (action == 'move') {
+      if (!mounted) return;
       final targets = _folders.where((folder) => folder.path != message.mailboxPath).toList();
       final target = await showModalBottomSheet<MailFolder>(context: context, showDragHandle: true, builder: (ctx) => SafeArea(child: ListView(shrinkWrap: true, children: [for (final folder in targets) ListTile(leading: Icon(_folderIcon(folder)), title: Text(_folderTitle(folder)), onTap: () => Navigator.pop(ctx, folder))])));
       if (target != null) {
@@ -658,6 +722,18 @@ class _MailHomeState extends State<MailHome>
   Future<void> _bulkDelete() async {
     final selected = _messages.where((m) => _selectedMessageIds.contains(m.identity)).toList();
     if (selected.isEmpty || _accounts.isEmpty) return;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete selected messages?'),
+        content: Text('Move ${selected.length} message(s) to Trash, or permanently delete them if this server has no Trash folder?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted || _accounts.isEmpty) return;
     try {
       await _service.deleteMessages(_accounts[_active], selected);
       if (mounted) setState(() { _messages.removeWhere((m) => _selectedMessageIds.contains(m.identity)); _selectedMessageIds.clear(); });
@@ -692,14 +768,10 @@ class _MailHomeState extends State<MailHome>
     try {
       final caches = <String, Object?>{};
       for (final account in _accounts) {
-        final folders = <String, Object?>{};
-        for (final folder in _folders) {
-          final raw = await _vault.readMailCache(account.id, folder.path);
-          if (raw != null) folders[folder.path] = jsonDecode(raw);
-        }
-        final activeRaw = await _vault.readMailCache(account.id, _folderPath);
-        if (activeRaw != null) folders[_folderPath] = jsonDecode(activeRaw);
-        caches[account.id] = folders;
+        final stored = await _vault.readMailCaches(account.id);
+        caches[account.id] = {
+          for (final entry in stored.entries) entry.key: jsonDecode(entry.value),
+        };
       }
       final bytes = await EncryptedMailBackup.encrypt({
         'accounts': _accounts.map((account) => account.toJson()).toList(),
@@ -731,9 +803,14 @@ class _MailHomeState extends State<MailHome>
       final caches = payload['mailCache'];
       if (caches is Map<String, dynamic>) {
         for (final entry in caches.entries) {
+          // Never import unrelated caches from a malformed backup.
+          if (!byId.containsKey(entry.key)) continue;
           final folders = entry.value;
           if (folders is! Map<String, dynamic>) continue;
           for (final folder in folders.entries) {
+            if (folder.key.isEmpty || folder.key.length > 512 || folder.value is! List) {
+              continue;
+            }
             await _vault.writeMailCache(entry.key, folder.key, jsonEncode(folder.value));
           }
         }
@@ -949,6 +1026,8 @@ class _MailHomeState extends State<MailHome>
                     setState(() {
                       _folderPath = 'INBOX';
                       _messages = [];
+                      _selectedMail = null;
+                      _selectedMessageIds.clear();
                     });
                     _refresh();
                   },
@@ -1005,6 +1084,8 @@ class _MailHomeState extends State<MailHome>
                         _folderPath = 'INBOX';
                         _messages = [];
                         _selectedMail = null;
+                    _folders = const [];
+                    _selectedMessageIds.clear();
                       });
                       _loadFolders().then((_) => _refresh());
                     },
@@ -1624,8 +1705,8 @@ class _MailHomeState extends State<MailHome>
 
   Widget _drawer() => Drawer(
     child: SafeArea(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: ListView(
+        padding: EdgeInsets.zero,
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(22, 22, 22, 18),
@@ -1714,6 +1795,8 @@ class _MailHomeState extends State<MailHome>
                   _folderPath = 'INBOX';
                   _messages = [];
                   _selectedMail = null;
+                    _folders = const [];
+                    _selectedMessageIds.clear();
                 });
                 Navigator.pop(context);
                 _loadFolders().then((_) => _refresh());
@@ -1751,7 +1834,6 @@ class _MailHomeState extends State<MailHome>
           const Divider(),
           ListTile(leading: const Icon(Icons.lock_outline), title: const Text('Export encrypted backup'), onTap: () { Navigator.pop(context); _exportBackup(); }),
           ListTile(leading: const Icon(Icons.settings_backup_restore_outlined), title: const Text('Import backup'), onTap: () { Navigator.pop(context); _importBackup(); }),
-          const Spacer(),
           const Padding(
             padding: EdgeInsets.all(22),
             child: Text(
@@ -1770,8 +1852,8 @@ class _MailHomeState extends State<MailHome>
     builder: (ctx) => SafeArea(
       child: Padding(
         padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
+        child: ListView(
+          shrinkWrap: true,
           children: [
             const Align(
               alignment: Alignment.centerLeft,
@@ -1797,6 +1879,8 @@ class _MailHomeState extends State<MailHome>
                     _folderPath = 'INBOX';
                     _messages = [];
                     _selectedMail = null;
+                    _folders = const [];
+                    _selectedMessageIds.clear();
                   });
                   Navigator.pop(ctx);
                   _loadFolders().then((_) => _refresh());
@@ -2036,11 +2120,15 @@ class MailDetailPage extends StatelessWidget {
 class _AddAccountPageState extends State<AddAccountPage> {
   final _email = TextEditingController();
   final _password = TextEditingController();
+  final _imapHost = TextEditingController();
+  final _smtpHost = TextEditingController();
   bool _hide = true;
   @override
   void dispose() {
     _email.dispose();
     _password.dispose();
+    _imapHost.dispose();
+    _smtpHost.dispose();
     super.dispose();
   }
 
@@ -2099,6 +2187,36 @@ class _AddAccountPageState extends State<AddAccountPage> {
                 ),
               ),
             ),
+            const SizedBox(height: 10),
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              title: const Text('Advanced server settings'),
+              subtitle: const Text('Use separate hostnames from your email provider'),
+              children: [
+                TextField(
+                  controller: _imapHost,
+                  textInputAction: TextInputAction.next,
+                  autocorrect: false,
+                  decoration: const InputDecoration(
+                    labelText: 'IMAP hostname (optional)',
+                    hintText: 'mail.example.com',
+                    helperText: 'Secure IMAP port 993',
+                    prefixIcon: Icon(Icons.dns_outlined),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _smtpHost,
+                  autocorrect: false,
+                  decoration: const InputDecoration(
+                    labelText: 'SMTP hostname (optional)',
+                    hintText: 'mail.example.com',
+                    helperText: 'Secure SMTP port 465',
+                    prefixIcon: Icon(Icons.outgoing_mail),
+                  ),
+                ),
+              ],
+            ),
             const SizedBox(height: 22),
             FilledButton.icon(
               onPressed: _submit,
@@ -2129,13 +2247,27 @@ class _AddAccountPageState extends State<AddAccountPage> {
       );
       return;
     }
+    final defaultHost = cPanelHostCandidates(email).first.host;
+    final imapHost = _imapHost.text.trim().isEmpty
+        ? defaultHost
+        : _imapHost.text.trim().toLowerCase();
+    final smtpHost = _smtpHost.text.trim().isEmpty
+        ? imapHost
+        : _smtpHost.text.trim().toLowerCase();
+    if (!isValidMailServerHost(imapHost) ||
+        !isValidMailServerHost(smtpHost)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Text('Enter valid DNS hostnames without https:// or port numbers.'),
+      ));
+      return;
+    }
     Navigator.pop(
       context,
       MailAccount(
         email: email,
         password: _password.text,
-        imapHost: cPanelHostCandidates(email).first.host,
-        smtpHost: cPanelHostCandidates(email).first.host,
+        imapHost: imapHost,
+        smtpHost: smtpHost,
       ),
     );
   }
@@ -2156,6 +2288,8 @@ class _ComposePageState extends State<ComposePage> {
   late final _to = TextEditingController(text: widget.initialTo);
   late final _subject = TextEditingController(text: widget.initialSubject);
   late final _body = TextEditingController(text: widget.initialBody);
+  final List<OutgoingMailAttachment> _attachments = [];
+  bool _pickingFiles = false;
   bool _sending = false;
   @override
   void dispose() {
@@ -2206,9 +2340,82 @@ class _ComposePageState extends State<ComposePage> {
           maxLines: 24,
           decoration: const InputDecoration(hintText: 'Write your message…'),
         ),
+        const SizedBox(height: 12),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: _pickingFiles || _sending ? null : _pickAttachments,
+            icon: const Icon(Icons.attach_file_rounded),
+            label: Text(_pickingFiles ? 'Opening files…' : 'Attach files'),
+          ),
+        ),
+        if (_attachments.isNotEmpty)
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final attachment in _attachments)
+                InputChip(
+                  label: Text(attachment.name),
+                  onDeleted: _sending
+                      ? null
+                      : () => setState(() => _attachments.remove(attachment)),
+                ),
+            ],
+          ),
+        const SizedBox(height: 8),
+        const Text('Attachments: 20 MB total maximum',
+            style: TextStyle(color: _muted, fontSize: 11)),
       ],
     ),
   );
+
+  Future<void> _pickAttachments() async {
+    setState(() => _pickingFiles = true);
+    try {
+      final selected = await FilePicker.pickFiles(type: FileType.any);
+      if (selected.isEmpty || !mounted) return;
+      final additions = <OutgoingMailAttachment>[];
+      var total = _attachments.fold<int>(
+        0,
+        (bytes, attachment) => bytes + attachment.bytes.length,
+      );
+      for (final file in selected) {
+        final reportedLength = file.lengthSync() ?? await file.length();
+        if (reportedLength != null &&
+            total + reportedLength > 20 * 1024 * 1024) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('20 MB total attachment limit reached.'),
+            ));
+          }
+          break;
+        }
+        final data = await file.readAsBytes();
+        if (data.isEmpty) continue;
+        if (total + data.length > 20 * 1024 * 1024) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('20 MB total attachment limit reached.')),
+            );
+          }
+          break;
+        }
+        total += data.length;
+        additions.add(OutgoingMailAttachment(name: file.name, bytes: data));
+      }
+      if (mounted) setState(() => _attachments.addAll(additions));
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not attach file: ${friendlyMailError(error)}')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _pickingFiles = false);
+    }
+  }
+
   Future<void> _send() async {
     if (!isValidMailAddress(_to.text)) {
       ScaffoldMessenger.of(
@@ -2223,6 +2430,7 @@ class _ComposePageState extends State<ComposePage> {
         to: _to.text.trim(),
         subject: _subject.text.trim(),
         body: _body.text,
+        attachments: List<OutgoingMailAttachment>.of(_attachments),
       );
       if (mounted) Navigator.pop(context, true);
     } catch (e) {

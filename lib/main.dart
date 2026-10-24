@@ -649,6 +649,14 @@ class _MailHomeState extends State<MailHome>
     );
   }
 
+  Future<void> _saveCurrentFolderSnapshot(MailAccount account, String folderPath) async {
+    if (!mounted || _accounts.isEmpty ||
+        _accounts[_active].id != account.id || _folderPath != folderPath) return;
+    final snapshot = List<MailItem>.of(_messages);
+    await _vault.writeMailCache(account.id, folderPath,
+        jsonEncode(snapshot.map((mail) => mail.toJson()).toList()));
+  }
+
   Future<void> _actOnMail(MailItem message, String action) async {
     if (_accounts.isEmpty) return;
     final account = _accounts[_active];
@@ -692,6 +700,12 @@ class _MailHomeState extends State<MailHome>
             }
           }
         });
+        if (action == 'delete' || action == 'spam' || action == 'archive') {
+          _selectedMail = _messages.where(
+              (mail) => mail.identity == _selectedMail?.identity
+          ).firstOrNull ?? _messages.firstOrNull;
+        }
+        await _saveCurrentFolderSnapshot(account, message.mailboxPath);
         _notice(action == 'read' ? 'Marked as read.' : action == 'unread' ? 'Marked as unread.' : action == 'star' ? 'Star updated.' : 'Message moved.');
       }
     } catch (e) {
@@ -740,7 +754,14 @@ class _MailHomeState extends State<MailHome>
       if (confirmed != true || !mounted || _accounts.isEmpty) return;
       try {
         await _service.deleteMessages(_accounts[_active], sameSender);
-        if (mounted) setState(() { _messages.removeWhere((m) => sameSender.any((item) => item.identity == m.identity)); _selectedMessageIds.removeAll(sameSender.map((m) => m.identity)); });
+        if (mounted) {
+          setState(() {
+            _messages.removeWhere((m) => sameSender.any((item) => item.identity == m.identity));
+            _selectedMessageIds.removeAll(sameSender.map((m) => m.identity));
+            _selectedMail = _messages.firstOrNull;
+          });
+          await _saveCurrentFolderSnapshot(_accounts[_active], _folderPath);
+        }
       } catch (e) { if (mounted) _notice(friendlyMailError(e)); }
     } else if (action == 'move') {
       if (!mounted) return;

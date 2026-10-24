@@ -423,13 +423,17 @@ class _MailHomeState extends State<MailHome>
             if (isActiveInbox) {
               final items = await _service.fetchInbox(account);
               if (!mounted ||
-                  !_accounts.any((saved) => saved.id == account.id)) return;
+                  !_accounts.any((saved) => saved.id == account.id)) {
+                return;
+              }
               await _vault.writeMailCache(account.id, 'INBOX',
                   jsonEncode(items.map((item) => item.toJson()).toList()));
               if (!mounted ||
                   _accounts.isEmpty ||
                   _accounts[_active].id != account.id ||
-                  _folderPath.toUpperCase() != 'INBOX') return;
+                  _folderPath.toUpperCase() != 'INBOX') {
+                return;
+              }
               setState(() {
                 _messages = items;
                 _selectedMail = items

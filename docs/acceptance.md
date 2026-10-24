@@ -10,8 +10,11 @@
 - [x] Ask for local notification permission when the first account is connected; detect unread-mail changes during foreground sync.
 - [x] Schedule Android background unread checks with WorkManager when the app is backgrounded; Android may defer checks under battery/network restrictions.
 - [x] Remove an account and erase its saved password from secure storage.
-- [ ] Add persistent offline cache and complete message flag actions.
-- [ ] Add attachments, reply/forward, full HTML rendering, and background scheduling for iOS and desktop.
+- [x] Cache fetched mailbox messages offline and support server-side read, star, delete, move, spam and archive actions.
+- [x] Erase cached message bodies when an account is removed, and include every cached folder for every saved account in encrypted backups.
+- [ ] Verify offline cache and message-action persistence across app restarts on physical devices.
+- [x] Add basic plain-text reply/forward and print actions.
+- [ ] Add attachment reading/writing, richer safe HTML rendering, and background scheduling for iOS and desktop.
 - [ ] Verify notification behavior independently on current Android and iOS devices; no instant push guarantee is made.
 - [ ] Verify email connection and notifications on current Android and iOS devices with real mailbox credentials.
 - [ ] Complete store signing, distribution and review. iOS workflow output is unsigned and must be signed before installation or release.

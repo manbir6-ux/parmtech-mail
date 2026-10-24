@@ -558,7 +558,7 @@ class _MailHomeState extends State<MailHome>
       return;
     }
     final account = await Navigator.of(context).push<MailAccount>(
-      MaterialPageRoute(builder: (_) => AddAccountPage(existingAccounts: _accounts)),
+      MaterialPageRoute(builder: (_) => const AddAccountPage()),
     );
     if (account == null || !mounted) return;
     var refreshAfterConnect = false;
@@ -2206,11 +2206,7 @@ class _MailHomeState extends State<MailHome>
 }
 
 class AddAccountPage extends StatefulWidget {
-  const AddAccountPage({super.key, this.existingAccounts = const []});
-
-  /// Already verified accounts on this device. Used for an opt-in,
-  /// password-free server preset when multiple domains share one cPanel host.
-  final List<MailAccount> existingAccounts;
+  const AddAccountPage({super.key});
 
   @override
   State<AddAccountPage> createState() => _AddAccountPageState();
@@ -2376,8 +2372,6 @@ class MailDetailPage extends StatelessWidget {
 class _AddAccountPageState extends State<AddAccountPage> {
   final _email = TextEditingController();
   final _password = TextEditingController();
-  final _imapHost = TextEditingController();
-  final _smtpHost = TextEditingController();
   final _verifyService = CpanelMailService();
   bool _hide = true;
   bool _testing = false;
@@ -2386,8 +2380,6 @@ class _AddAccountPageState extends State<AddAccountPage> {
   void dispose() {
     _email.dispose();
     _password.dispose();
-    _imapHost.dispose();
-    _smtpHost.dispose();
     super.dispose();
   }
 
@@ -2447,128 +2439,36 @@ class _AddAccountPageState extends State<AddAccountPage> {
                 ),
               ),
             ),
-            const SizedBox(height: 12),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
-              child: Text(
-                mailSetupHint(_email.text),
-                style: const TextStyle(fontSize: 12, height: 1.5, color: _muted),
+            const SizedBox(height: 18),
+            Container(
+              padding: const EdgeInsets.all(15),
+              decoration: BoxDecoration(
+                color: _orange.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: _orange.withValues(alpha: 0.16)),
               ),
-            ),
-            if (isValidMailAddress(_email.text)) ...[
-              const SizedBox(height: 5),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 4),
-                child: Text(
-                  'Server: IMAP ${_imapHost.text.trim().isEmpty ? cPanelHostCandidates(_email.text).first.host : _imapHost.text.trim()} · SMTP ${_smtpHost.text.trim().isEmpty ? recommendedSmtpHost(_email.text) : _smtpHost.text.trim()}',
-                  style: const TextStyle(fontSize: 11, color: _orange),
-                ),
-              ),
-            ],
-            if (isValidMailAddress(_email.text) &&
-                !const {'gmail.com', 'googlemail.com', 'yahoo.com', 'ymail.com',
-                  'rocketmail.com', 'aol.com', 'icloud.com', 'me.com', 'mac.com',
-                  'outlook.com', 'hotmail.com', 'live.com', 'office365.com'}
-                    .contains(_email.text.trim().split('@').last.toLowerCase())) ...[
-              const SizedBox(height: 14),
-              OutlinedButton.icon(
-                onPressed: _testing ? null : () {
-                  setState(() {
-                    _imapHost.text = 'premium214.web-hosting.com';
-                    _smtpHost.text = 'premium214.web-hosting.com';
-                    _connectionError = null;
-                  });
-                },
-                icon: const Icon(Icons.cloud_done_outlined),
-                label: const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 9),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Use ParmTech shared hosting',
-                          style: TextStyle(fontWeight: FontWeight.w800)),
-                      Text('premium214.web-hosting.com · secure IMAP & SMTP',
-                          style: TextStyle(fontSize: 12, color: _muted)),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-            if (reusableMailServers(widget.existingAccounts).isNotEmpty) ...[
-              const SizedBox(height: 16),
-              const Text(
-                'Use the same hosting server',
-                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15),
-              ),
-              const SizedBox(height: 5),
-              const Text(
-                'If this mailbox is hosted alongside a connected account, reuse its verified secure IMAP/SMTP hostnames. The password is never copied.',
-                style: TextStyle(fontSize: 12, color: _muted, height: 1.4),
-              ),
-              const SizedBox(height: 8),
-              for (final server in reusableMailServers(widget.existingAccounts))
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 7),
-                  child: OutlinedButton.icon(
-                    onPressed: _testing ? null : () {
-                      setState(() {
-                        _imapHost.text = server.imapHost;
-                        _smtpHost.text = server.smtpHost;
-                        _connectionError = null;
-                      });
-                    },
-                    icon: const Icon(Icons.dns_outlined, size: 19),
-                    label: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'Use server from ${server.sourceEmail}',
-                            style: const TextStyle(fontWeight: FontWeight.w700),
-                          ),
-                          Text(
-                            server.imapHost == server.smtpHost
-                                ? server.imapHost
-                                : 'IMAP: ${server.imapHost} · SMTP: ${server.smtpHost}',
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 12, color: _muted),
-                          ),
-                        ],
-                      ),
+              child: const Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.verified_user_rounded, color: _orange, size: 23),
+                  SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('ParmTech Private Mail',
+                            style: TextStyle(fontWeight: FontWeight.w800)),
+                        SizedBox(height: 5),
+                        Text(
+                          'Only mailboxes created on the ParmTech hosting server can sign in. '
+                          'Secure IMAP and SMTP are configured automatically.',
+                          style: TextStyle(fontSize: 12, color: _muted, height: 1.45),
+                        ),
+                      ],
                     ),
                   ),
-                ),
-            ],
-            const SizedBox(height: 10),
-            ExpansionTile(
-              tilePadding: EdgeInsets.zero,
-              title: const Text('Advanced server settings'),
-              subtitle: const Text('Use exact Secure SSL/TLS server names from your provider'),
-              children: [
-                TextField(
-                  controller: _imapHost,
-                  textInputAction: TextInputAction.next,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: 'IMAP hostname (optional)',
-                    hintText: 'mail.example.com',
-                    helperText: 'Secure IMAP port 993',
-                    prefixIcon: Icon(Icons.dns_outlined),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: _smtpHost,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: 'SMTP hostname (optional)',
-                    hintText: 'mail.example.com',
-                    helperText: 'Secure SMTP port 465',
-                    prefixIcon: Icon(Icons.outgoing_mail),
-                  ),
-                ),
-              ],
+                ],
+              ),
             ),
             const SizedBox(height: 22),
             if (_connectionError != null) ...[
@@ -2597,7 +2497,8 @@ class _AddAccountPageState extends State<AddAccountPage> {
                     ),
                     const SizedBox(height: 8),
                     const Text(
-                      'You can adjust the IMAP/SMTP hostnames above and retry without retyping your password.',
+                      'Check that this mailbox exists on the ParmTech hosting server '
+                      'and that its password is correct. TLS errors must be fixed on the server.',
                       style: TextStyle(fontSize: 12),
                     ),
                   ],
@@ -2635,24 +2536,6 @@ class _AddAccountPageState extends State<AddAccountPage> {
       );
       return;
     }
-    final recommended = cPanelHostCandidates(email);
-    if (recommended.isEmpty) return;
-    final manual = _imapHost.text.trim().isNotEmpty ||
-        _smtpHost.text.trim().isNotEmpty;
-    final imapHost = _imapHost.text.trim().isEmpty
-        ? recommended.first.host
-        : _imapHost.text.trim().toLowerCase();
-    final smtpHost = _smtpHost.text.trim().isEmpty
-        ? recommendedSmtpHost(email)
-        : _smtpHost.text.trim().toLowerCase();
-    if (!isValidMailServerHost(imapHost) ||
-        !isValidMailServerHost(smtpHost)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Enter DNS hostnames without https:// or port numbers.'),
-      ));
-      return;
-    }
-
     setState(() {
       _testing = true;
       _connectionError = null;
@@ -2661,9 +2544,8 @@ class _AddAccountPageState extends State<AddAccountPage> {
       final verified = await _verifyService.verify(MailAccount(
         email: email,
         password: _password.text,
-        imapHost: imapHost,
-        smtpHost: smtpHost,
-        useCustomServer: manual,
+        imapHost: parmTechMailServerHost,
+        smtpHost: parmTechMailServerHost,
       ));
       if (mounted) Navigator.pop(context, verified);
     } catch (error) {
